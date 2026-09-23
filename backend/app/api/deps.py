@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
 from app.core.security import decode_access_token
+from app.models.subject import Subject
 from app.models.user import User
 
 # OAuth2 scheme pointing to login endpoint
@@ -57,3 +58,24 @@ async def get_current_user(
             detail="User not found"
         )
     return user
+
+
+async def require_owned_subject(
+    db: AsyncSession,
+    subject_id: uuid.UUID,
+    current_user: User,
+) -> Subject:
+    """Verifies the subject exists and belongs to the current user (404 otherwise)."""
+    result = await db.execute(
+        select(Subject).where(
+            Subject.id == subject_id,
+            Subject.user_id == current_user.id,
+        )
+    )
+    subject = result.scalar_one_or_none()
+    if not subject:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subject not found or access denied.",
+        )
+    return subject
