@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     
     # LLM / AI Keys
     GEMINI_API_KEY: str = ""
+    GEMINI_QA_MODEL: str = "gemini-3.6-flash"
     
     # Security
     SECRET_KEY: str = "development_secret_key_change_in_production"
