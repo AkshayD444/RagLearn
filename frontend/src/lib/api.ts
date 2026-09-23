@@ -34,6 +34,83 @@ export interface Document {
   created_at: string;
 }
 
+export interface RagSource {
+  chunk_id: string;
+  document_id: string;
+  document_title: string;
+  chunk_index: number;
+  page_number: number;
+  content: string;
+  score: number;
+}
+
+export interface RagAnswerResponse {
+  subject_id: string;
+  question: string;
+  answer: string;
+  sources: RagSource[];
+  model_used: string;
+}
+
+export type QuizDifficulty = "easy" | "medium" | "hard";
+
+export interface QuizQuestion {
+  id: string;
+  question_text: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  difficulty: string;
+  source_document_id: string | null;
+  source_document_title: string | null;
+  source_chunk_id: string | null;
+  source_page_number: number | null;
+  source_snippet: string | null;
+}
+
+export interface Quiz {
+  id: string;
+  subject_id: string;
+  title: string;
+  difficulty: string;
+  question_count: number;
+  topic: string | null;
+  created_at: string;
+  questions: QuizQuestion[];
+}
+
+export type SelectedOption = "A" | "B" | "C" | "D";
+
+export interface AnswerItem {
+  question_id: string;
+  selected_option: SelectedOption;
+}
+
+export interface QuestionResult {
+  question_id: string;
+  question_text: string;
+  selected_option: string;
+  correct_option: string;
+  is_correct: boolean;
+  explanation: string;
+  difficulty: string;
+  source_document_id: string | null;
+  source_document_title: string | null;
+  source_chunk_id: string | null;
+  source_page_number: number | null;
+  source_snippet: string | null;
+}
+
+export interface QuizResultResponse {
+  quiz_id: string;
+  title: string;
+  total_questions: number;
+  score: number;
+  percentage: number;
+  results: QuestionResult[];
+}
+
 class ApiClient {
   private getToken(): string | null {
     if (typeof window === "undefined") return null;
@@ -135,6 +212,43 @@ class ApiClient {
   async deleteDocument(documentId: string): Promise<void> {
     return this.request<void>(`/documents/${documentId}`, {
       method: "DELETE",
+    });
+  }
+
+  // RAG Tutor Endpoints
+  async askRagTutor(
+    subjectId: string,
+    question: string,
+    top_k = 5,
+  ): Promise<RagAnswerResponse> {
+    return this.request<RagAnswerResponse>("/rag/ask", {
+      method: "POST",
+      body: JSON.stringify({ subject_id: subjectId, question, top_k }),
+    });
+  }
+
+  // Quiz Endpoints
+  async generateQuiz(
+    subjectId: string,
+    questionCount: number,
+    difficulty: QuizDifficulty,
+    topic?: string | null,
+  ): Promise<Quiz> {
+    return this.request<Quiz>("/quizzes/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        subject_id: subjectId,
+        question_count: questionCount,
+        difficulty,
+        topic: topic || null,
+      }),
+    });
+  }
+
+  async submitQuiz(quizId: string, answers: AnswerItem[]): Promise<QuizResultResponse> {
+    return this.request<QuizResultResponse>(`/quizzes/${quizId}/submit`, {
+      method: "POST",
+      body: JSON.stringify({ answers }),
     });
   }
 }

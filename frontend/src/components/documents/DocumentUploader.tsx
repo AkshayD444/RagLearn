@@ -18,7 +18,7 @@ export function DocumentUploader({ subjectId, onUploadSuccess }: DocumentUploade
   const handleFileChange = async (file: File | undefined) => {
     if (!file) return;
 
-    if (!file.name.toLowerCase().endswith(".pdf")) {
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
       setError("Only PDF (.pdf) documents are supported.");
       return;
     }

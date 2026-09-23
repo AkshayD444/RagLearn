@@ -6,6 +6,8 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { api, Subject, Document } from "@/lib/api";
 import { DocumentUploader } from "@/components/documents/DocumentUploader";
 import { DocumentList } from "@/components/documents/DocumentList";
+import { RagTutor } from "@/components/rag/RagTutor";
+import { QuizSection } from "@/components/quiz/QuizSection";
 import { 
   ArrowLeft, 
   BookOpen, 
@@ -70,6 +72,10 @@ export default function SubjectDetailPage() {
     } catch (err) {
       console.error("Failed to delete document:", err);
     }
+  };
+
+  const scrollToSection = (sectionId: string) => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   if (isLoading) {
@@ -145,13 +151,15 @@ export default function SubjectDetailPage() {
             <div className="flex flex-wrap items-center gap-3 shrink-0">
               <button
                 disabled={readyDocs === 0}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 text-white text-xs font-semibold shadow-lg shadow-sky-500/20 disabled:opacity-50 transition-all"
+                onClick={() => scrollToSection("rag-tutor")}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 text-white text-xs font-semibold shadow-lg shadow-sky-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 <Bot className="h-4 w-4" /> Ask RAG Tutor
               </button>
               <button
                 disabled={readyDocs === 0}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600/30 text-purple-300 border border-purple-500/40 text-xs font-semibold disabled:opacity-50 transition-all"
+                onClick={() => scrollToSection("quiz-engine")}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600/30 text-purple-300 border border-purple-500/40 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 <Sparkles className="h-4 w-4" /> Generate Quiz
               </button>
@@ -215,6 +223,34 @@ export default function SubjectDetailPage() {
             />
           </div>
         </div>
+
+        {/* RAG Tutor Section */}
+        <section id="rag-tutor" className="space-y-6 scroll-mt-20">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Bot className="h-5 w-5 text-sky-400" /> RAG Tutor — Ask AI
+            </h2>
+            <p className="text-xs text-slate-400">
+              Ask questions about this subject. Answers are strictly grounded in the indexed chunks from your uploaded
+              PDFs, with per-source citations.
+            </p>
+          </div>
+          <RagTutor subjectId={subjectId} hasReadyDocuments={readyDocs > 0} />
+        </section>
+
+        {/* Quiz Engine Section */}
+        <section id="quiz-engine" className="space-y-6 scroll-mt-20">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-purple-400" /> Quiz Engine
+            </h2>
+            <p className="text-xs text-slate-400">
+              Configure a multiple-choice quiz generated from this subject&apos;s study materials, complete and submit
+              it, then review explanations and sources.
+            </p>
+          </div>
+          <QuizSection subjectId={subjectId} hasReadyDocuments={readyDocs > 0} />
+        </section>
       </main>
     </div>
   );
