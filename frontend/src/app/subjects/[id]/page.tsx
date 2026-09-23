@@ -1,0 +1,221 @@
+"use client";
+
+import React, { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useAuthStore } from "@/store/useAuthStore";
+import { api, Subject, Document } from "@/lib/api";
+import { DocumentUploader } from "@/components/documents/DocumentUploader";
+import { DocumentList } from "@/components/documents/DocumentList";
+import { 
+  ArrowLeft, 
+  BookOpen, 
+  Bot, 
+  BrainCircuit, 
+  Sparkles, 
+  FileText,
+  Layers,
+  HelpCircle,
+  FolderOpen
+} from "lucide-react";
+
+export default function SubjectDetailPage() {
+  const params = useParams();
+  const router = useRouter();
+  const subjectId = params?.id as string;
+
+  const { user, token, initialize } = useAuthStore();
+  const [subject, setSubject] = useState<Subject | null>(null);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
+
+  useEffect(() => {
+    if (token && subjectId) {
+      fetchSubjectData();
+    }
+  }, [token, subjectId]);
+
+  const fetchSubjectData = async () => {
+    setIsLoading(true);
+    try {
+      const [subjData, docsData] = await Promise.all([
+        api.getSubject(subjectId),
+        api.getSubjectDocuments(subjectId),
+      ]);
+      setSubject(subjData);
+      setDocuments(docsData);
+    } catch (err) {
+      console.error("Failed to load subject details:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDocumentUploaded = (newDoc: Document) => {
+    setDocuments((prev) => [newDoc, ...prev]);
+    // Refresh documents after 2s to check processing status
+    setTimeout(() => {
+      api.getSubjectDocuments(subjectId).then(setDocuments).catch(() => {});
+    }, 2500);
+  };
+
+  const handleDeleteDocument = async (docId: string) => {
+    if (!confirm("Are you sure you want to delete this document and its vector embeddings?")) return;
+    try {
+      await api.deleteDocument(docId);
+      setDocuments((prev) => prev.filter((d) => d.id !== docId));
+    } catch (err) {
+      console.error("Failed to delete document:", err);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="h-8 w-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (!subject) {
+    return (
+      <div className="min-h-screen bg-slate-950 p-8 text-center text-slate-300">
+        <p>Subject not found.</p>
+        <button
+          onClick={() => router.push("/dashboard")}
+          className="mt-4 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white"
+        >
+          Back to Dashboard
+        </button>
+      </div>
+    );
+  }
+
+  const totalChunks = documents.reduce((sum, d) => sum + (d.chunk_count || 0), 0);
+  const readyDocs = documents.filter((d) => d.status === "READY").length;
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
+      {/* Header Bar */}
+      <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-900/80 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="flex items-center gap-2 text-slate-400 hover:text-white text-xs font-semibold transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back to Dashboard
+          </button>
+
+          <div className="flex items-center gap-2">
+            <span 
+              className="h-3 w-3 rounded-full" 
+              style={{ backgroundColor: subject.color }} 
+            />
+            <span className="font-bold text-sm text-white">{subject.title}</span>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Container */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        {/* Subject Hero Header */}
+        <div 
+          className="relative overflow-hidden rounded-3xl border border-slate-800 p-6 sm:p-8 bg-slate-900/60"
+        >
+          <div 
+            className="absolute top-0 left-0 right-0 h-2" 
+            style={{ backgroundColor: subject.color }} 
+          />
+
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-2 max-w-2xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 text-slate-300 text-xs font-semibold">
+                <BookOpen className="h-3.5 w-3.5" style={{ color: subject.color }} /> Subject Module
+              </div>
+              <h1 className="text-3xl font-extrabold text-white tracking-tight">{subject.title}</h1>
+              <p className="text-sm text-slate-400 leading-relaxed">
+                {subject.description || "Upload textbooks and PDF study guides below to enable grounded RAG tutoring."}
+              </p>
+            </div>
+
+            {/* Downstream RAG & Quiz Quick Action Buttons */}
+            <div className="flex flex-wrap items-center gap-3 shrink-0">
+              <button
+                disabled={readyDocs === 0}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 text-white text-xs font-semibold shadow-lg shadow-sky-500/20 disabled:opacity-50 transition-all"
+              >
+                <Bot className="h-4 w-4" /> Ask RAG Tutor
+              </button>
+              <button
+                disabled={readyDocs === 0}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600/30 text-purple-300 border border-purple-500/40 text-xs font-semibold disabled:opacity-50 transition-all"
+              >
+                <Sparkles className="h-4 w-4" /> Generate Quiz
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats Row */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/40 flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20">
+              <FileText className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-medium">Uploaded Documents</p>
+              <p className="text-xl font-bold text-white">{documents.length} Files ({readyDocs} Ready)</p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/40 flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+              <Layers className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-medium">Extracted RAG Vectors</p>
+              <p className="text-xl font-bold text-white">{totalChunks} Chunks</p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/40 flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <BrainCircuit className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-xs text-slate-400 font-medium">Vector Indexing</p>
+              <p className="text-xl font-bold text-white">Gemini 768-dim</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Upload & Documents Section */}
+        <div className="space-y-6">
+          <div className="space-y-1">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <FolderOpen className="h-5 w-5 text-sky-400" /> Study Materials & PDFs
+            </h2>
+            <p className="text-xs text-slate-400">
+              Upload course PDFs to extract text chunks and vector embeddings for contextual AI tutoring.
+            </p>
+          </div>
+
+          <DocumentUploader
+            subjectId={subjectId}
+            onUploadSuccess={handleDocumentUploaded}
+          />
+
+          <div className="pt-4">
+            <DocumentList
+              documents={documents}
+              onDelete={handleDeleteDocument}
+            />
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
