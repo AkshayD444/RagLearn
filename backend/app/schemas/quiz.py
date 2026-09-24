@@ -60,6 +60,7 @@ class QuizRead(BaseModel):
 class AnswerItem(BaseModel):
     question_id: uuid.UUID
     selected_option: str = Field(min_length=1, max_length=8)
+    time_taken: Optional[float] = Field(default=None, ge=0)
 
     @field_validator("selected_option")
     @classmethod
@@ -72,6 +73,7 @@ class AnswerItem(BaseModel):
 
 class QuizSubmission(BaseModel):
     answers: List[AnswerItem] = Field(min_length=1)
+    started_at: Optional[datetime] = None
 
 
 class QuestionResult(BaseModel):
@@ -92,7 +94,10 @@ class QuestionResult(BaseModel):
 class QuizResultResponse(BaseModel):
     quiz_id: uuid.UUID
     title: str
+    attempt_id: Optional[uuid.UUID] = None
     total_questions: int
     score: int
+    correct_answers: int = 0
+    incorrect_answers: int = 0
     percentage: float
     results: List[QuestionResult] = Field(default_factory=list)

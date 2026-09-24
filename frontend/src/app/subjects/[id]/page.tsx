@@ -8,6 +8,7 @@ import { DocumentUploader } from "@/components/documents/DocumentUploader";
 import { DocumentList } from "@/components/documents/DocumentList";
 import { RagTutor } from "@/components/rag/RagTutor";
 import { QuizSection } from "@/components/quiz/QuizSection";
+import { StudentIntelligence } from "@/components/analytics/StudentIntelligence";
 import { 
   ArrowLeft, 
   BookOpen, 
@@ -17,7 +18,8 @@ import {
   FileText,
   Layers,
   HelpCircle,
-  FolderOpen
+  FolderOpen,
+  Activity
 } from "lucide-react";
 
 export default function SubjectDetailPage() {
@@ -29,6 +31,7 @@ export default function SubjectDetailPage() {
   const [subject, setSubject] = useState<Subject | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [performanceRefreshKey, setPerformanceRefreshKey] = useState(0);
 
   useEffect(() => {
     initialize();
@@ -249,7 +252,25 @@ export default function SubjectDetailPage() {
               it, then review explanations and sources.
             </p>
           </div>
-          <QuizSection subjectId={subjectId} hasReadyDocuments={readyDocs > 0} />
+          <QuizSection
+            subjectId={subjectId}
+            hasReadyDocuments={readyDocs > 0}
+            onAttemptComplete={() => setPerformanceRefreshKey((k) => k + 1)}
+          />
+        </section>
+
+        {/* Student Intelligence Section */}
+        <section id="student-intelligence" className="space-y-6 scroll-mt-20">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Activity className="h-5 w-5 text-emerald-400" /> Student Intelligence
+            </h2>
+            <p className="text-xs text-slate-400">
+              Quiz performance converted into learning data — attempt history, accuracy, and confidence-aware
+              mastery for each topic in this subject.
+            </p>
+          </div>
+          <StudentIntelligence subjectId={subjectId} refreshKey={performanceRefreshKey} />
         </section>
       </main>
     </div>

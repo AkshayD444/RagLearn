@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import List, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy import select
@@ -17,10 +18,13 @@ async def list_subjects(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
-    """Retrieves all subjects owned by the current user."""
+    """Retrieves all active subjects owned by the current user."""
     result = await db.execute(
         select(Subject)
-        .where(Subject.user_id == current_user.id)
+        .where(
+            Subject.user_id == current_user.id,
+            Subject.deleted_at.is_(None),
+        )
         .order_by(Subject.created_at.desc())
     )
     subjects = result.scalars().all()
@@ -52,11 +56,12 @@ async def get_subject(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ) -> Any:
-    """Gets details of a single subject owned by the user."""
+    """Gets details of a single active subject owned by the user."""
     result = await db.execute(
         select(Subject).where(
             Subject.id == subject_id,
-            Subject.user_id == current_user.id
+            Subject.user_id == current_user.id,
+            Subject.deleted_at.is_(None),
         )
     )
     subject = result.scalar_one_or_none()
@@ -74,11 +79,14 @@ async def delete_subject(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Deletes a subject and all associated files/quizzes/flashcards."""
+    """Soft-deletes a subject. The row and all historical student performance
+    (quiz attempts, per-question answers, topic mastery) are preserved but the
+    subject is hidden from active reads and can no longer be used."""
     result = await db.execute(
         select(Subject).where(
             Subject.id == subject_id,
-            Subject.user_id == current_user.id
+            Subject.user_id == current_user.id,
+            Subject.deleted_at.is_(None),
         )
     )
     subject = result.scalar_one_or_none()
@@ -87,6 +95,6 @@ async def delete_subject(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Subject not found."
         )
-    await db.delete(subject)
+    subject.deleted_at = datetime.utcnow()
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

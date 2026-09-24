@@ -30,6 +30,7 @@ class Quiz(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, nullable=False
     )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     questions: Mapped[List["QuizQuestion"]] = relationship(
         "QuizQuestion", back_populates="quiz", cascade="all, delete-orphan"
@@ -53,6 +54,7 @@ class QuizQuestion(Base):
     correct_option: Mapped[str] = mapped_column(String(1), nullable=False)
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
     difficulty: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+    topic: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Citation metadata (snapshots survive document deletion; FKs null out)
     document_id: Mapped[Optional[uuid.UUID]] = mapped_column(

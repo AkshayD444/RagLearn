@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   AnswerItem,
@@ -28,6 +28,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 interface QuizSectionProps {
   subjectId: string;
   hasReadyDocuments: boolean;
+  onAttemptComplete?: () => void;
 }
 
 type View = "browse" | "taking" | "results";
@@ -40,7 +41,7 @@ const DIFFICULTY_OPTIONS: { value: QuizDifficulty; label: string }[] = [
 
 const QUESTION_COUNTS = [3, 5, 10, 15, 20];
 
-export function QuizSection({ subjectId, hasReadyDocuments }: QuizSectionProps) {
+export function QuizSection({ subjectId, hasReadyDocuments, onAttemptComplete }: QuizSectionProps) {
   const [view, setView] = useState<View>("browse");
   const [questionCount, setQuestionCount] = useState(5);
   const [difficulty, setDifficulty] = useState<QuizDifficulty>("medium");
@@ -50,6 +51,10 @@ export function QuizSection({ subjectId, hasReadyDocuments }: QuizSectionProps) 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selections, setSelections] = useState<Record<string, SelectedOption>>({});
   const [result, setResult] = useState<QuizResultResponse | null>(null);
+
+  const [questionStartTimes, setQuestionStartTimes] = useState<Record<string, number>>({});
+  const [questionTimes, setQuestionTimes] = useState<Record<string, number>>({});
+  const quizStartedAt = useRef<number | null>(null);
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -62,6 +67,19 @@ export function QuizSection({ subjectId, hasReadyDocuments }: QuizSectionProps) 
   );
   const isLastQuestion = quiz !== null && currentIndex >= quiz.questions.length - 1;
 
+  useEffect(() => {
+    if (!quiz || !currentQuestion) return;
+    setQuestionStartTimes((prev) =>
+      prev[currentQuestion.id] !== undefined ? prev : { ...prev, [currentQuestion.id]: Date.now() },
+    );
+  }, [quiz, currentQuestion]);
+
+  const resetQuizTimer = () => {
+    quizStartedAt.current = Date.now();
+    setQuestionStartTimes({});
+    setQuestionTimes({});
+  };
+
   const handleGenerate = async () => {
     if (!hasReadyDocuments) return;
 
@@ -72,6 +90,7 @@ export function QuizSection({ subjectId, hasReadyDocuments }: QuizSectionProps) 
       setSelections({});
       setCurrentIndex(0);
       setQuiz(generated);
+      resetQuizTimer();
       setView("taking");
     } catch (err: any) {
       setQuiz(null);
@@ -83,6 +102,12 @@ export function QuizSection({ subjectId, hasReadyDocuments }: QuizSectionProps) 
 
   const handleSelect = (questionId: string, option: SelectedOption) => {
     setSelections((prev) => ({ ...prev, [questionId]: option }));
+    setQuestionTimes((prev) => {
+      if (prev[questionId] !== undefined) return prev;
+      const started = questionStartTimes[questionId];
+      const elapsed = started ? Math.max(0.1, Math.round((Date.now() - started) / 100) / 10) : undefined;
+      return elapsed === undefined ? prev : { ...prev, [questionId]: elapsed };
+    });
   };
 
   const handleNext = () => {
@@ -108,10 +133,13 @@ export function QuizSection({ subjectId, hasReadyDocuments }: QuizSectionProps) 
       const answers: AnswerItem[] = quiz.questions.map((q) => ({
         question_id: q.id,
         selected_option: selections[q.id],
+        time_taken: questionTimes[q.id] ?? null,
       }));
-      const response = await api.submitQuiz(quiz.id, answers);
+      const startedAt = quizStartedAt.current ? new Date(quizStartedAt.current).toISOString() : null;
+      const response = await api.submitQuiz(quiz.id, answers, { startedAt });
       setResult(response);
       setView("results");
+      onAttemptComplete?.();
     } catch (err: any) {
       setError(err.message || "Failed to submit answers. Please try again.");
     } finally {
@@ -279,6 +307,12 @@ export function QuizSection({ subjectId, hasReadyDocuments }: QuizSectionProps) 
             You scored <span className="font-bold text-white">{result.score}</span> out of{" "}
             <span className="font-bold text-white">{result.total_questions}</span> questions correct.
           </p>
+
+          {result.attempt_id && (
+            <p className="mt-3 text-[11px] text-emerald-400/90">
+              Attempt saved — your performance and topic mastery have been updated.
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-800/60 text-emerald-400 text-[10px] font-semibold">

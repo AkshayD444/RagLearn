@@ -85,6 +85,7 @@ export type SelectedOption = "A" | "B" | "C" | "D";
 export interface AnswerItem {
   question_id: string;
   selected_option: SelectedOption;
+  time_taken?: number | null;
 }
 
 export interface QuestionResult {
@@ -105,10 +106,64 @@ export interface QuestionResult {
 export interface QuizResultResponse {
   quiz_id: string;
   title: string;
+  attempt_id: string | null;
   total_questions: number;
   score: number;
+  correct_answers: number;
+  incorrect_answers: number;
   percentage: number;
   results: QuestionResult[];
+}
+
+export interface DifficultyBreakdown {
+  difficulty: string;
+  attempted: number;
+  correct: number;
+  accuracy: number;
+}
+
+export interface PerformanceSummary {
+  total_attempts: number;
+  total_questions: number;
+  total_correct: number;
+  total_incorrect: number;
+  accuracy: number;
+  average_percentage: number;
+  best_percentage: number;
+  difficulty_breakdown: DifficultyBreakdown[];
+}
+
+export interface QuizAttempt {
+  id: string;
+  quiz_id: string;
+  subject_id: string;
+  score: number;
+  total_questions: number;
+  percentage: number;
+  started_at: string | null;
+  completed_at: string;
+}
+
+export interface TopicMastery {
+  id: string;
+  subject_id: string;
+  topic: string;
+  attempts: number;
+  questions_attempted: number;
+  questions_correct: number;
+  questions_incorrect: number;
+  accuracy: number;
+  mastery_score: number;
+  mastery_level: string;
+  last_attempt_at: string | null;
+  updated_at: string;
+}
+
+export interface SubjectPerformance {
+  subject_id: string;
+  summary: PerformanceSummary;
+  attempts: QuizAttempt[];
+  mastery: TopicMastery[];
 }
 
 class ApiClient {
@@ -245,11 +300,23 @@ class ApiClient {
     });
   }
 
-  async submitQuiz(quizId: string, answers: AnswerItem[]): Promise<QuizResultResponse> {
+  async submitQuiz(
+    quizId: string,
+    answers: AnswerItem[],
+    options?: { startedAt?: string | null },
+  ): Promise<QuizResultResponse> {
     return this.request<QuizResultResponse>(`/quizzes/${quizId}/submit`, {
       method: "POST",
-      body: JSON.stringify({ answers }),
+      body: JSON.stringify({
+        answers,
+        ...(options?.startedAt ? { started_at: options.startedAt } : {}),
+      }),
     });
+  }
+
+  // Analytics / Student Intelligence Endpoints
+  async getSubjectPerformance(subjectId: string): Promise<SubjectPerformance> {
+    return this.request<SubjectPerformance>(`/analytics/subjects/${subjectId}/performance`);
   }
 }
 

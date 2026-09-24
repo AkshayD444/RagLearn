@@ -65,11 +65,12 @@ async def require_owned_subject(
     subject_id: uuid.UUID,
     current_user: User,
 ) -> Subject:
-    """Verifies the subject exists and belongs to the current user (404 otherwise)."""
+    """Verifies the subject exists, is not deleted, and belongs to the current user (404 otherwise)."""
     result = await db.execute(
         select(Subject).where(
             Subject.id == subject_id,
             Subject.user_id == current_user.id,
+            Subject.deleted_at.is_(None),
         )
     )
     subject = result.scalar_one_or_none()

@@ -258,7 +258,7 @@ class QuizGenerationService:
         await session.flush()
 
         for item in items:
-            session.add(QuizQuestion(quiz_id=quiz.id, **item))
+            session.add(QuizQuestion(quiz_id=quiz.id, topic=topic, **item))
 
         await session.commit()
         await session.refresh(quiz)

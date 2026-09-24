@@ -33,7 +33,8 @@ async def upload_document(
     res = await db.execute(
         select(Subject).where(
             Subject.id == subject_id,
-            Subject.user_id == current_user.id
+            Subject.user_id == current_user.id,
+            Subject.deleted_at.is_(None),
         )
     )
     subject = res.scalar_one_or_none()
@@ -124,11 +125,12 @@ async def list_subject_documents(
     current_user: User = Depends(get_current_user)
 ) -> Any:
     """Retrieves all uploaded study documents for a subject."""
-    # Check subject ownership
+    # Check subject ownership (active subjects only)
     res = await db.execute(
         select(Subject).where(
             Subject.id == subject_id,
-            Subject.user_id == current_user.id
+            Subject.user_id == current_user.id,
+            Subject.deleted_at.is_(None),
         )
     )
     if not res.scalar_one_or_none():

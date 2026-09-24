@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,7 @@ from app.schemas.quiz import (
     QuizSubmission,
 )
 from app.services.quiz_engine import NoStudyMaterialsError, quiz_generation_service
+from app.services.student_intelligence import AnswerEvaluation, persist_attempt
 
 router = APIRouter(prefix="/quizzes", tags=["Quizzes"])
 
@@ -37,6 +39,7 @@ async def _load_owned_quiz(
         select(Quiz).where(
             Quiz.id == quiz_id,
             Quiz.user_id == current_user.id,
+            Quiz.deleted_at.is_(None),
         )
     )
     quiz = result.scalar_one_or_none()
@@ -133,18 +136,20 @@ async def submit_quiz(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Any:
-    """Evaluates a student's answers and returns scoring with explanations and sources."""
+    """Evaluates a student's answers, persists the attempt, and returns scoring
+    with explanations and sources."""
     quiz = await _load_owned_quiz(db, quiz_id, current_user)
     questions = await _load_questions(db, quiz_id)
 
     _validate_submission(payload.answers, questions)
 
-    question_map = {q.id: q for q in questions}
+    answer_index = {answer.question_id: answer for answer in payload.answers}
     results = []
+    evaluations = []
     score = 0
 
-    for answer in payload.answers:
-        question = question_map[answer.question_id]
+    for question in questions:
+        answer = answer_index[question.id]
         is_correct = question.correct_option == answer.selected_option
         if is_correct:
             score += 1
@@ -164,15 +169,57 @@ async def submit_quiz(
                 source_snippet=question.source_snippet,
             )
         )
+        evaluations.append(
+            AnswerEvaluation(
+                question_id=question.id,
+                question_text=question.question_text,
+                selected_answer=answer.selected_option,
+                correct_answer=question.correct_option,
+                is_correct=is_correct,
+                difficulty=question.difficulty,
+                topic=question.topic,
+                time_taken=answer.time_taken,
+            )
+        )
 
     total = len(results)
     percentage = round(score / total * 100, 1) if total else 0.0
+    correct_answers = score
+    incorrect_answers = total - score
+
+    attempt = await persist_attempt(
+        db,
+        user=current_user,
+        quiz=quiz,
+        evaluations=evaluations,
+        started_at=payload.started_at,
+        completed_at=None,
+    )
+    await db.commit()
+    await db.refresh(attempt)
 
     return QuizResultResponse(
         quiz_id=quiz.id,
         title=quiz.title,
+        attempt_id=attempt.id,
         total_questions=total,
         score=score,
+        correct_answers=correct_answers,
+        incorrect_answers=incorrect_answers,
         percentage=percentage,
         results=results,
     )
+
+
+@router.delete("/{quiz_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+async def delete_quiz(
+    quiz_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Soft-deletes an owned quiz. Historical attempts and answers for the quiz
+    are preserved, but the quiz is no longer submitted or visible."""
+    quiz = await _load_owned_quiz(db, quiz_id, current_user)
+    quiz.deleted_at = datetime.utcnow()
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
