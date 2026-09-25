@@ -5,6 +5,7 @@ from app.models.document_chunk import DocumentChunk
 from app.models.quiz import Quiz, QuizQuestion
 from app.models.attempt import QuizAttempt, QuizAttemptAnswer
 from app.models.mastery import TopicMastery
+from app.models.study_plan import StudyPlan, StudyPlanItem, StudyPlanSession
 
 __all__ = [
     "User",
@@ -16,4 +17,7 @@ __all__ = [
     "QuizAttempt",
     "QuizAttemptAnswer",
     "TopicMastery",
+    "StudyPlan",
+    "StudyPlanSession",
+    "StudyPlanItem",
 ]

@@ -10,6 +10,7 @@ from app.api.v1.rag import router as rag_router
 from app.api.v1.quizzes import router as quizzes_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.recommendations import router as recommendations_router
+from app.api.v1.study_plans import router as study_plans_router
 from app.core.config import settings
 from app.core.database import engine, Base
 
@@ -48,6 +49,7 @@ app.include_router(rag_router, prefix="/api/v1")
 app.include_router(quizzes_router, prefix="/api/v1")
 app.include_router(analytics_router, prefix="/api/v1")
 app.include_router(recommendations_router, prefix="/api/v1")
+app.include_router(study_plans_router, prefix="/api/v1")
 
 
 @app.get("/")

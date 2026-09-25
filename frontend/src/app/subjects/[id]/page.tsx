@@ -28,6 +28,7 @@ export default function SubjectDetailPage() {
   const searchParams = useSearchParams();
   const subjectId = params?.id as string;
   const recommendedTopic = searchParams.get("topic")?.trim() || null;
+  const focusSection = searchParams.get("focus");
 
   const { user, token, initialize } = useAuthStore();
   const [subject, setSubject] = useState<Subject | null>(null);
@@ -85,9 +86,10 @@ export default function SubjectDetailPage() {
 
   useEffect(() => {
     if (recommendedTopic && !isLoading) {
-      document.getElementById("quiz-engine")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const sectionId = focusSection === "materials" ? "study-materials" : "quiz-engine";
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  }, [recommendedTopic, isLoading]);
+  }, [focusSection, recommendedTopic, isLoading]);
 
   if (isLoading) {
     return (
@@ -212,7 +214,7 @@ export default function SubjectDetailPage() {
         </div>
 
         {/* Upload & Documents Section */}
-        <div className="space-y-6">
+        <div id="study-materials" className="space-y-6 scroll-mt-20">
           <div className="space-y-1">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
               <FolderOpen className="h-5 w-5 text-sky-400" /> Study Materials & PDFs

@@ -7,6 +7,7 @@ import { AuthModal } from "@/components/auth/AuthModal";
 import { SubjectCard } from "@/components/dashboard/SubjectCard";
 import { CreateSubjectModal } from "@/components/dashboard/CreateSubjectModal";
 import { RecommendedForYou } from "@/components/recommendations/RecommendedForYou";
+import { StudyPlanSection } from "@/components/study-plan/StudyPlanSection";
 import { 
   BookOpen, 
   Plus, 
@@ -15,7 +16,8 @@ import {
   BrainCircuit, 
   BarChart3, 
   Layers, 
-  GraduationCap 
+  GraduationCap,
+  ListChecks
 } from "lucide-react";
 
 export default function DashboardPage() {
@@ -175,6 +177,18 @@ export default function DashboardPage() {
             </p>
           </div>
           <RecommendedForYou limit={5} />
+        </section>
+
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <ListChecks className="h-5 w-5 text-emerald-400" /> Your Study Plan
+            </h2>
+            <p className="text-xs text-slate-400">
+              A personalized sequence built from your measured mastery, accuracy, attempts, and adaptive recommendations.
+            </p>
+          </div>
+          <StudyPlanSection subjects={subjects} />
         </section>
 
         {/* Subjects Header & List */}

@@ -186,6 +186,55 @@ export interface Recommendation {
   last_attempt_at: string | null;
 }
 
+export type StudyPlanAction = "LEARN" | "PRACTICE" | "REVIEW" | "MAINTAIN";
+
+export interface StudyPlanItem {
+  id: string;
+  session_id: string;
+  topic: string;
+  action: StudyPlanAction;
+  priority: number;
+  estimated_minutes: number;
+  reason: string;
+  completed: boolean;
+  completed_at: string | null;
+  material_available: boolean;
+  mastery: number;
+  accuracy: number;
+  attempts: number;
+  questions_attempted: number;
+  questions_incorrect: number;
+  suggested_difficulty: QuizDifficulty;
+}
+
+export interface StudyPlanSession {
+  id: string;
+  session_number: number;
+  scheduled_date: string | null;
+  estimated_minutes: number;
+  items: StudyPlanItem[];
+}
+
+export interface StudyPlan {
+  id: string;
+  subject_id: string;
+  subject_title: string;
+  generated_at: string;
+  created_at: string;
+  target_date: string | null;
+  material_available: boolean;
+  omitted_topic_count: number;
+  sessions: StudyPlanSession[];
+}
+
+export interface StudyPlanGenerateOptions {
+  subject_id: string;
+  target_date?: string | null;
+  available_minutes_per_day?: number | null;
+  requested_sessions?: number | null;
+  max_topics_per_session?: number | null;
+}
+
 class ApiClient {
   private getToken(): string | null {
     if (typeof window === "undefined") return null;
@@ -346,6 +395,32 @@ class ApiClient {
 
   async getTopRecommendations(limit = 5): Promise<Recommendation[]> {
     return this.request<Recommendation[]>(`/recommendations/top?limit=${limit}`);
+  }
+
+  async generateStudyPlan(payload: StudyPlanGenerateOptions): Promise<StudyPlan> {
+    return this.request<StudyPlan>("/study-plans/generate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getLatestStudyPlan(subjectId?: string): Promise<StudyPlan | null> {
+    const query = subjectId ? `?subject_id=${encodeURIComponent(subjectId)}` : "";
+    try {
+      return await this.request<StudyPlan>(`/study-plans/latest${query}`);
+    } catch (error) {
+      if (error instanceof Error && error.message === "No study plan found.") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async completeStudyPlanItem(itemId: string, completed = true): Promise<StudyPlan> {
+    return this.request<StudyPlan>(`/study-plans/items/${itemId}/complete`, {
+      method: "PATCH",
+      body: JSON.stringify({ completed }),
+    });
   }
 }
 
