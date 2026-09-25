@@ -166,6 +166,26 @@ export interface SubjectPerformance {
   mastery: TopicMastery[];
 }
 
+export type RecommendationType = "REVIEW" | "PRACTICE" | "MAINTAIN";
+
+export interface Recommendation {
+  subject_id: string;
+  subject_title: string;
+  topic: string;
+  priority: number;
+  mastery: number;
+  mastery_level: string;
+  accuracy: number;
+  attempts: number;
+  questions_attempted: number;
+  questions_incorrect: number;
+  recommendation_type: RecommendationType;
+  reason: string;
+  suggested_action: string;
+  suggested_difficulty: QuizDifficulty;
+  last_attempt_at: string | null;
+}
+
 class ApiClient {
   private getToken(): string | null {
     if (typeof window === "undefined") return null;
@@ -317,6 +337,15 @@ class ApiClient {
   // Analytics / Student Intelligence Endpoints
   async getSubjectPerformance(subjectId: string): Promise<SubjectPerformance> {
     return this.request<SubjectPerformance>(`/analytics/subjects/${subjectId}/performance`);
+  }
+
+  // Adaptive Learning Endpoints
+  async getSubjectRecommendations(subjectId: string, limit = 5): Promise<Recommendation[]> {
+    return this.request<Recommendation[]>(`/recommendations/subjects/${subjectId}?limit=${limit}`);
+  }
+
+  async getTopRecommendations(limit = 5): Promise<Recommendation[]> {
+    return this.request<Recommendation[]>(`/recommendations/top?limit=${limit}`);
   }
 }
 

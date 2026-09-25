@@ -6,6 +6,7 @@ import { api, Subject } from "@/lib/api";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { SubjectCard } from "@/components/dashboard/SubjectCard";
 import { CreateSubjectModal } from "@/components/dashboard/CreateSubjectModal";
+import { RecommendedForYou } from "@/components/recommendations/RecommendedForYou";
 import { 
   BookOpen, 
   Plus, 
@@ -162,6 +163,19 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* Recommended for You */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-sky-400" /> Recommended for You
+            </h2>
+            <p className="text-xs text-slate-400">
+              Deterministic, data-driven topics to focus on next based on your quiz performance and topic mastery.
+            </p>
+          </div>
+          <RecommendedForYou limit={5} />
+        </section>
 
         {/* Subjects Header & List */}
         <section className="space-y-6">

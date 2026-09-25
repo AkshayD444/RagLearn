@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
 import { api, Subject, Document } from "@/lib/api";
 import { DocumentUploader } from "@/components/documents/DocumentUploader";
@@ -25,7 +25,9 @@ import {
 export default function SubjectDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const subjectId = params?.id as string;
+  const recommendedTopic = searchParams.get("topic")?.trim() || null;
 
   const { user, token, initialize } = useAuthStore();
   const [subject, setSubject] = useState<Subject | null>(null);
@@ -80,6 +82,12 @@ export default function SubjectDetailPage() {
   const scrollToSection = (sectionId: string) => {
     document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  useEffect(() => {
+    if (recommendedTopic && !isLoading) {
+      document.getElementById("quiz-engine")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [recommendedTopic, isLoading]);
 
   if (isLoading) {
     return (
@@ -255,6 +263,7 @@ export default function SubjectDetailPage() {
           <QuizSection
             subjectId={subjectId}
             hasReadyDocuments={readyDocs > 0}
+            initialTopic={recommendedTopic ?? undefined}
             onAttemptComplete={() => setPerformanceRefreshKey((k) => k + 1)}
           />
         </section>

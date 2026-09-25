@@ -28,6 +28,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 interface QuizSectionProps {
   subjectId: string;
   hasReadyDocuments: boolean;
+  initialTopic?: string;
   onAttemptComplete?: () => void;
 }
 
@@ -41,11 +42,11 @@ const DIFFICULTY_OPTIONS: { value: QuizDifficulty; label: string }[] = [
 
 const QUESTION_COUNTS = [3, 5, 10, 15, 20];
 
-export function QuizSection({ subjectId, hasReadyDocuments, onAttemptComplete }: QuizSectionProps) {
+export function QuizSection({ subjectId, hasReadyDocuments, initialTopic, onAttemptComplete }: QuizSectionProps) {
   const [view, setView] = useState<View>("browse");
   const [questionCount, setQuestionCount] = useState(5);
   const [difficulty, setDifficulty] = useState<QuizDifficulty>("medium");
-  const [topic, setTopic] = useState("");
+  const [topic, setTopic] = useState(initialTopic ?? "");
 
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
