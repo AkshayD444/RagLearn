@@ -272,3 +272,41 @@ describe("api request bodies", () => {
     });
   });
 });
+
+describe("api student intelligence endpoints", () => {
+  it("requests subject performance", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ subject_id: "subject-1" }));
+
+    await api.getSubjectPerformance("subject-1");
+
+    expect(lastCall()[0]).toBe(`${BASE}/analytics/subjects/subject-1/performance`);
+  });
+
+  it("requests topic-level mastery", async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]));
+
+    await api.getSubjectMastery("subject-1");
+
+    expect(lastCall()[0]).toBe(`${BASE}/analytics/subjects/subject-1/mastery`);
+  });
+
+  it("requests weak topics with the default limit", async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]));
+
+    await api.getSubjectWeakTopics("subject-1");
+
+    expect(lastCall()[0]).toBe(
+      `${BASE}/analytics/subjects/subject-1/weak-topics?limit=20`,
+    );
+  });
+
+  it("passes an explicit weak-topic limit through", async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]));
+
+    await api.getSubjectWeakTopics("subject-1", 5);
+
+    expect(lastCall()[0]).toBe(
+      `${BASE}/analytics/subjects/subject-1/weak-topics?limit=5`,
+    );
+  });
+});

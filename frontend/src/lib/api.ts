@@ -166,6 +166,35 @@ export interface SubjectPerformance {
   mastery: TopicMastery[];
 }
 
+export type WeakReasonCode =
+  | "repeated_mistakes"
+  | "low_accuracy"
+  | "insufficient_evidence";
+
+export interface WeakReason {
+  /**
+   * A code the backend can add at any time. The `string` arm keeps unknown
+   * rules representable so a newer backend degrades to the raw code instead of
+   * breaking the type contract; the union still drives editor completion.
+   */
+  code: WeakReasonCode | (string & {});
+  message: string;
+}
+
+export interface WeakTopic {
+  subject_id: string;
+  topic: string;
+  mastery_score: number;
+  mastery_level: string;
+  accuracy: number;
+  attempts: number;
+  questions_attempted: number;
+  questions_correct: number;
+  questions_incorrect: number;
+  reasons: WeakReason[];
+  last_attempt_at: string | null;
+}
+
 export type RecommendationType = "REVIEW" | "PRACTICE" | "MAINTAIN";
 
 export interface Recommendation {
@@ -386,6 +415,16 @@ class ApiClient {
   // Analytics / Student Intelligence Endpoints
   async getSubjectPerformance(subjectId: string): Promise<SubjectPerformance> {
     return this.request<SubjectPerformance>(`/analytics/subjects/${subjectId}/performance`);
+  }
+
+  async getSubjectMastery(subjectId: string): Promise<TopicMastery[]> {
+    return this.request<TopicMastery[]>(`/analytics/subjects/${subjectId}/mastery`);
+  }
+
+  async getSubjectWeakTopics(subjectId: string, limit = 20): Promise<WeakTopic[]> {
+    return this.request<WeakTopic[]>(
+      `/analytics/subjects/${subjectId}/weak-topics?limit=${limit}`,
+    );
   }
 
   // Adaptive Learning Endpoints

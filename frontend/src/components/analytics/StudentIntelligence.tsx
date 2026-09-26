@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { api, SubjectPerformance, TopicMastery } from "@/lib/api";
+import { api, SubjectPerformance, TopicMastery, WeakTopic } from "@/lib/api";
 import { Spinner } from "@/components/shared/Spinner";
 import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Layers,
   Clock,
+  AlertTriangle,
 } from "lucide-react";
 
 interface StudentIntelligenceProps {
@@ -39,6 +40,22 @@ function masteryBarColor(level: string): string {
   return LEVEL_BAR_COLORS[level] ?? "from-slate-500 to-slate-400";
 }
 
+const REASON_LABELS: Record<string, string> = {
+  repeated_mistakes: "Repeated mistakes",
+  low_accuracy: "Low accuracy",
+  insufficient_evidence: "Needs more evidence",
+};
+
+const REASON_STYLES: Record<string, string> = {
+  repeated_mistakes: "bg-rose-950/80 border-rose-800/60 text-rose-400",
+  low_accuracy: "bg-amber-950/80 border-amber-800/60 text-amber-400",
+  insufficient_evidence: "bg-slate-900/80 border-slate-700/60 text-slate-400",
+};
+
+function reasonLabel(code: string): string {
+  return REASON_LABELS[code] ?? code;
+}
+
 function formatDate(value: string | null): string {
   if (!value) return "—";
   return new Date(value).toLocaleString(undefined, {
@@ -51,6 +68,7 @@ function formatDate(value: string | null): string {
 
 export function StudentIntelligence({ subjectId, refreshKey = 0 }: StudentIntelligenceProps) {
   const [data, setData] = useState<SubjectPerformance | null>(null);
+  const [weakTopics, setWeakTopics] = useState<WeakTopic[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,6 +84,23 @@ export function StudentIntelligence({ subjectId, refreshKey = 0 }: StudentIntell
       setIsLoading(false);
     }
   };
+
+  // Weak topics are supplementary: a failure here must not hide the
+  // performance summary, so it degrades to an empty list.
+  useEffect(() => {
+    let active = true;
+    api
+      .getSubjectWeakTopics(subjectId)
+      .then((topics) => {
+        if (active) setWeakTopics(topics);
+      })
+      .catch(() => {
+        if (active) setWeakTopics([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [subjectId, refreshKey]);
 
   useEffect(() => {
     load();
@@ -170,6 +205,26 @@ export function StudentIntelligence({ subjectId, refreshKey = 0 }: StudentIntell
             </div>
           </div>
 
+          {/* Needs Practice */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-400" />
+              <h4 className="text-sm font-bold text-white">Needs Practice</h4>
+            </div>
+
+            {weakTopics.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                No weak topics detected. Every topic you have answered looks solid.
+              </p>
+            ) : (
+              <div className="space-y-2.5">
+                {weakTopics.map((item) => (
+                  <WeakTopicRow key={`${item.subject_id}-${item.topic}`} item={item} />
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Difficulty Breakdown */}
           {summary.difficulty_breakdown.length > 0 && (
             <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:p-5 space-y-4">
@@ -241,6 +296,39 @@ export function StudentIntelligence({ subjectId, refreshKey = 0 }: StudentIntell
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function WeakTopicRow({ item }: { item: WeakTopic }) {
+  return (
+    <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-bold text-white capitalize truncate">{item.topic}</p>
+        <span className="shrink-0 text-[11px] text-slate-400">
+          {item.questions_correct}/{item.questions_attempted} • {item.accuracy}% accuracy
+        </span>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {item.reasons.map((reason) => (
+          <span
+            key={reason.code}
+            title={reason.message}
+            className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-semibold ${
+              REASON_STYLES[reason.code] ?? REASON_STYLES.insufficient_evidence
+            }`}
+          >
+            {reasonLabel(reason.code)}
+          </span>
+        ))}
+      </div>
+      <ul className="mt-2 space-y-0.5">
+        {item.reasons.map((reason) => (
+          <li key={`${reason.code}-detail`} className="text-[10px] text-slate-500">
+            {reason.message}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

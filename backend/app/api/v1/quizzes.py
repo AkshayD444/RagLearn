@@ -18,7 +18,11 @@ from app.schemas.quiz import (
     QuizSubmission,
 )
 from app.services.quiz_engine import NoStudyMaterialsError, quiz_generation_service
-from app.services.student_intelligence import AnswerEvaluation, persist_attempt
+from app.services.student_intelligence import (
+    AnswerEvaluation,
+    persist_attempt,
+    score_evaluations,
+)
 
 router = APIRouter(prefix="/quizzes", tags=["Quizzes"])
 
@@ -146,13 +150,10 @@ async def submit_quiz(
     answer_index = {answer.question_id: answer for answer in payload.answers}
     results = []
     evaluations = []
-    score = 0
 
     for question in questions:
         answer = answer_index[question.id]
         is_correct = question.correct_option == answer.selected_option
-        if is_correct:
-            score += 1
         results.append(
             QuestionResult(
                 question_id=question.id,
@@ -182,10 +183,7 @@ async def submit_quiz(
             )
         )
 
-    total = len(results)
-    percentage = round(score / total * 100, 1) if total else 0.0
-    correct_answers = score
-    incorrect_answers = total - score
+    scored = score_evaluations(evaluations)
 
     attempt = await persist_attempt(
         db,
@@ -202,11 +200,11 @@ async def submit_quiz(
         quiz_id=quiz.id,
         title=quiz.title,
         attempt_id=attempt.id,
-        total_questions=total,
-        score=score,
-        correct_answers=correct_answers,
-        incorrect_answers=incorrect_answers,
-        percentage=percentage,
+        total_questions=scored.total_questions,
+        score=scored.score,
+        correct_answers=scored.correct_answers,
+        incorrect_answers=scored.incorrect_answers,
+        percentage=scored.percentage,
         results=results,
     )
 

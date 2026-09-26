@@ -96,7 +96,8 @@ AI-Learning-Assistant/
 │   │   ├── schemas/         # Pydantic request/response schemas
 │   │   ├── rag/             # Grounded RAG retrieval & Gemini SDK wrappers
 │   │   └── services/        # Business logic (Quiz Engine, Student Intelligence,
-│   │                        #   Adaptive Learning, Study Planner)
+│   │                        #   Weak Topic Detection, Adaptive Learning,
+│   │                        #   Study Planner)
 │   ├── tests/               # Pytest suite (SQLite) + tests/integration (pgvector)
 │   ├── .env.example
 │   ├── app/main.py          # FastAPI entry point

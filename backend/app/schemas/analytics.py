@@ -57,3 +57,24 @@ class SubjectPerformanceRead(BaseModel):
     summary: PerformanceSummary
     attempts: List[QuizAttemptRead] = Field(default_factory=list)
     mastery: List[TopicMasteryRead] = Field(default_factory=list)
+
+
+class WeakReasonRead(BaseModel):
+    """A single rule that flagged a topic, with the numbers that triggered it."""
+
+    code: str
+    message: str
+
+
+class WeakTopicRead(BaseModel):
+    subject_id: uuid.UUID
+    topic: str
+    mastery_score: float
+    mastery_level: str
+    accuracy: float
+    attempts: int
+    questions_attempted: int
+    questions_correct: int
+    questions_incorrect: int
+    reasons: List[WeakReasonRead] = Field(default_factory=list)
+    last_attempt_at: Optional[datetime] = None

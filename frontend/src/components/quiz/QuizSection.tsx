@@ -105,9 +105,13 @@ export function QuizSection({ subjectId, hasReadyDocuments, initialTopic, onAtte
     setSelections((prev) => ({ ...prev, [questionId]: option }));
     setQuestionTimes((prev) => {
       if (prev[questionId] !== undefined) return prev;
-      const started = questionStartTimes[questionId];
-      const elapsed = started ? Math.max(0.1, Math.round((Date.now() - started) / 100) / 10) : undefined;
-      return elapsed === undefined ? prev : { ...prev, [questionId]: elapsed };
+      // The effect that seeds the start time runs after the question is
+      // painted, so the very first click can beat it. Fall back to this
+      // instant instead of leaving the answer untimed, which would persist a
+      // null time_taken and lose the data the backend records per question.
+      const started = questionStartTimes[questionId] ?? Date.now();
+      const elapsed = Math.max(0.1, Math.round((Date.now() - started) / 100) / 10);
+      return { ...prev, [questionId]: elapsed };
     });
   };
 

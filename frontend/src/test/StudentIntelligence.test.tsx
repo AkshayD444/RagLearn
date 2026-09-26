@@ -1,16 +1,39 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SubjectPerformance, TopicMastery } from "@/lib/api";
+import type { SubjectPerformance, TopicMastery, WeakTopic } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
-  api: { getSubjectPerformance: vi.fn() },
+  api: { getSubjectPerformance: vi.fn(), getSubjectWeakTopics: vi.fn() },
 }));
 
 import { api } from "@/lib/api";
 import { StudentIntelligence } from "@/components/analytics/StudentIntelligence";
 
 const getSubjectPerformance = vi.mocked(api.getSubjectPerformance);
+const getSubjectWeakTopics = vi.mocked(api.getSubjectWeakTopics);
+
+function weakTopic(overrides: Partial<WeakTopic> = {}): WeakTopic {
+  return {
+    subject_id: "subject-1",
+    topic: "Nucleophilic substitution",
+    mastery_score: 31,
+    mastery_level: "novice",
+    accuracy: 40,
+    attempts: 2,
+    questions_attempted: 10,
+    questions_correct: 4,
+    questions_incorrect: 6,
+    reasons: [
+      {
+        code: "repeated_mistakes",
+        message: "6 incorrect answers across 2 attempts on this topic.",
+      },
+    ],
+    last_attempt_at: "2026-01-02T09:30:00Z",
+    ...overrides,
+  };
+}
 
 function mastery(overrides: Partial<TopicMastery> = {}): TopicMastery {
   return {
@@ -75,6 +98,8 @@ function performance(overrides: Partial<SubjectPerformance> = {}): SubjectPerfor
 
 beforeEach(() => {
   getSubjectPerformance.mockReset();
+  getSubjectWeakTopics.mockReset();
+  getSubjectWeakTopics.mockResolvedValue([]);
 });
 
 describe("StudentIntelligence loading", () => {
@@ -263,5 +288,117 @@ describe("StudentIntelligence recent attempts", () => {
     expect(screen.getByText("4 / 10 correct")).toBeInTheDocument();
     expect(screen.getAllByText("70%")).toHaveLength(2);
     expect(screen.getByText("40%")).toBeInTheDocument();
+  });
+});
+
+describe("StudentIntelligence needs practice", () => {
+  it("requests weak topics for the given subject", async () => {
+    getSubjectPerformance.mockResolvedValue(performance());
+
+    render(<StudentIntelligence subjectId="subject-1" />);
+
+    await waitFor(() =>
+      expect(getSubjectWeakTopics).toHaveBeenCalledWith("subject-1"),
+    );
+  });
+
+  it("refetches weak topics when refreshKey changes", async () => {
+    getSubjectPerformance.mockResolvedValue(performance());
+
+    const { rerender } = render(<StudentIntelligence subjectId="subject-1" refreshKey={0} />);
+    await waitFor(() => expect(getSubjectWeakTopics).toHaveBeenCalledTimes(1));
+
+    rerender(<StudentIntelligence subjectId="subject-1" refreshKey={1} />);
+    await waitFor(() => expect(getSubjectWeakTopics).toHaveBeenCalledTimes(2));
+  });
+
+  it("renders each weak topic with its accuracy and reasons", async () => {
+    getSubjectPerformance.mockResolvedValue(performance());
+    getSubjectWeakTopics.mockResolvedValue([weakTopic()]);
+
+    render(<StudentIntelligence subjectId="subject-1" />);
+
+    // The mastery fixture mirrors the weak-topic numbers, so the shared
+    // "4/10 • 40% accuracy" string appears in both panels: scope to this one.
+    const practiceCard = (await screen.findByText("Needs Practice")).closest(
+      "div.p-4",
+    ) as HTMLElement;
+
+    expect(within(practiceCard).getByText("Repeated mistakes")).toBeInTheDocument();
+    expect(
+      within(practiceCard).getByText("6 incorrect answers across 2 attempts on this topic."),
+    ).toBeInTheDocument();
+    expect(within(practiceCard).getByText("4/10 • 40% accuracy")).toBeInTheDocument();
+  });
+
+  it("labels every reason code the backend can return", async () => {
+    getSubjectPerformance.mockResolvedValue(performance());
+    getSubjectWeakTopics.mockResolvedValue([
+      weakTopic({
+        topic: "Multi-flagged",
+        reasons: [
+          { code: "repeated_mistakes", message: "Three wrong answers." },
+          { code: "low_accuracy", message: "Accuracy is 20%." },
+          { code: "insufficient_evidence", message: "Only 1 question answered." },
+        ],
+      }),
+    ]);
+
+    render(<StudentIntelligence subjectId="subject-1" />);
+
+    expect(await screen.findByText("Repeated mistakes")).toBeInTheDocument();
+    expect(screen.getByText("Low accuracy")).toBeInTheDocument();
+    expect(screen.getByText("Needs more evidence")).toBeInTheDocument();
+  });
+
+  it("falls back to the raw code for an unknown reason", async () => {
+    getSubjectPerformance.mockResolvedValue(performance());
+    getSubjectWeakTopics.mockResolvedValue([
+      weakTopic({ reasons: [{ code: "some_future_rule", message: "Because." }] }),
+    ]);
+
+    render(<StudentIntelligence subjectId="subject-1" />);
+
+    expect(await screen.findByText("some_future_rule")).toBeInTheDocument();
+  });
+
+  it("shows a reassuring message when no weak topics are detected", async () => {
+    getSubjectPerformance.mockResolvedValue(performance());
+    getSubjectWeakTopics.mockResolvedValue([]);
+
+    render(<StudentIntelligence subjectId="subject-1" />);
+
+    expect(
+      await screen.findByText(
+        "No weak topics detected. Every topic you have answered looks solid.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("still renders performance when the weak topics request fails", async () => {
+    getSubjectPerformance.mockResolvedValue(performance());
+    getSubjectWeakTopics.mockRejectedValue(new Error("Weak topics unavailable."));
+
+    render(<StudentIntelligence subjectId="subject-1" />);
+
+    // The supplementary panel degrades quietly instead of taking over the view.
+    expect(await screen.findByText("Topic Mastery")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "No weak topics detected. Every topic you have answered looks solid.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Weak topics unavailable.")).not.toBeInTheDocument();
+  });
+
+  it("hides the panel when there are no attempts at all", async () => {
+    getSubjectPerformance.mockResolvedValue(
+      performance({ summary: { ...performance().summary, total_attempts: 0 } }),
+    );
+
+    render(<StudentIntelligence subjectId="subject-1" />);
+
+    expect(await screen.findByText("No attempts recorded yet")).toBeInTheDocument();
+    expect(screen.queryByText("Needs Practice")).not.toBeInTheDocument();
   });
 });
