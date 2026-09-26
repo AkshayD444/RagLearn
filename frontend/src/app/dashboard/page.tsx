@@ -223,7 +223,7 @@ export default function DashboardPage() {
               <div>
                 <h3 className="text-base font-bold text-white">No Subjects Added Yet</h3>
                 <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                  Click "Add Subject" above to create your first course module (e.g. Computer Science, Physics, History).
+                  Click &quot;Add Subject&quot; above to create your first course module (e.g. Computer Science, Physics, History).
                 </p>
               </div>
               <button

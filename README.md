@@ -86,21 +86,68 @@ The database will run on `localhost:5432` with database `ai_learning_assistant`.
 AI-Learning-Assistant/
 ├── docker-compose.yml       # Docker Compose for PostgreSQL + pgvector
 ├── README.md                # Local setup instructions
-├── implementation_plan.md   # Architectural design and multi-phase roadmap
+├── .github/workflows/ci.yml # CI: backend tests, pgvector tests, frontend checks
 ├── backend/
 │   ├── app/
-│   │   ├── api/v1/          # REST API route handlers (/health, /health/db)
+│   │   ├── api/v1/          # REST API routers (auth, subjects, documents, rag,
+│   │   │                    #   quizzes, analytics, recommendations, study-plans, health)
 │   │   ├── core/            # Configuration & async SQLAlchemy database setup
-│   │   ├── models/          # ORM models (Users, Subjects, Documents, Chunks, etc.)
+│   │   ├── models/          # ORM models (Users, Subjects, Documents, Chunks, Quizzes, etc.)
+│   │   ├── schemas/         # Pydantic request/response schemas
 │   │   ├── rag/             # Grounded RAG retrieval & Gemini SDK wrappers
-│   │   └── services/        # Business logic (Spaced Repetition, Quiz Engine)
+│   │   └── services/        # Business logic (Quiz Engine, Student Intelligence,
+│   │                        #   Adaptive Learning, Study Planner)
+│   ├── tests/               # Pytest suite (SQLite) + tests/integration (pgvector)
 │   ├── .env.example
-│   ├── main.py              # FastAPI entry point
+│   ├── app/main.py          # FastAPI entry point
+│   ├── pytest.ini
 │   └── requirements.txt
 └── frontend/
     ├── src/
-    │   └── app/             # Next.js App Router (Layouts & Pages)
+    │   ├── app/             # Next.js App Router (Layouts & Pages)
+    │   ├── components/      # Feature components (auth, documents, rag, quiz, ...)
+    │   ├── lib/             # Typed API client and shared domain types
+    │   ├── store/           # Zustand auth store
+    │   └── test/            # Vitest unit tests and payload factories
     ├── package.json
+    ├── vitest.config.ts
     ├── tailwind.config.ts
     └── tsconfig.json
 ```
+
+---
+
+## Verification Commands
+
+Run from the repository root.
+
+### Backend
+
+```bash
+cd backend
+python -m pytest -q            # full SQLite suite
+python -m compileall -q app     # byte-compile check
+```
+
+The `postgres`-marked tests skip automatically unless a live pgvector instance
+is configured:
+
+```bash
+docker-compose up -d postgres
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ai_learning_assistant \
+    python -m pytest -q -m postgres
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run typecheck              # tsc --noEmit
+npm test                       # Vitest
+npm run lint                   # next lint
+npm run build                  # production build (also type-checks and lints)
+```
+
+`.github/workflows/ci.yml` runs these same commands across three jobs: backend
+(SQLite), backend pgvector integration tests, and frontend typecheck/lint/test/build.

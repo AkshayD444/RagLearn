@@ -208,7 +208,12 @@ describe("QuizSection submission", () => {
 
     fireEvent.click(optionButton("Nucleophile"));
     fireEvent.click(screen.getByRole("button", { name: /Next/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "Chelating agent" }));
+    // Both questions share the same option texts, so wait for the transition
+    // before picking the second answer.
+    expect(
+      await screen.findByText("Question 2 of 2 • Answers are revealed after submission"),
+    ).toBeInTheDocument();
+    fireEvent.click(optionButton("Chelating agent"));
     fireEvent.click(screen.getByRole("button", { name: /Submit Quiz/ }));
     return quiz;
   }

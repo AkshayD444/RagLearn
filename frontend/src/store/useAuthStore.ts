@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { api, User } from '@/lib/api';
 
-interface AuthState {
+export interface AuthState {
   user: User | null;
   token: string | null;
   isLoading: boolean;

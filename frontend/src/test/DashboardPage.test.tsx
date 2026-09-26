@@ -34,7 +34,7 @@ vi.mock("@/components/dashboard/CreateSubjectModal", () => ({
 
 import DashboardPage from "@/app/dashboard/page";
 import { api } from "@/lib/api";
-import { useAuthStore } from "@/store/useAuthStore";
+import { useAuthStore, type AuthState } from "@/store/useAuthStore";
 
 const getSubjects = vi.mocked(api.getSubjects);
 const createSubject = vi.mocked(api.createSubject);
@@ -47,8 +47,6 @@ const user = {
   full_name: "Ada Lovelace",
   created_at: "2026-01-01T00:00:00Z",
 };
-
-type AuthState = ReturnType<typeof useAuthStore>;
 
 function mockAuth(overrides: Partial<AuthState> = {}) {
   const state = {

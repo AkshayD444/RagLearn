@@ -126,6 +126,29 @@ class _BlockedNetworkCall(RuntimeError):
     """Raised when a test tries to open a real network connection."""
 
 
+# Captured at import time, before anything is patched, so the guard can hand the
+# genuine implementations back to `socket.socketpair` below.
+_REAL_SOCKET_CONNECT = socket.socket.connect
+_REAL_SOCKET_CONNECT_EX = socket.socket.connect_ex
+_REAL_SOCKETPAIR = socket.socketpair
+
+
+def _loopback_socketpair(*args, **kwargs):
+    """Creates a socket pair while the outbound-network guard stands down.
+
+    ``socket.socketpair`` is a strictly local primitive: it only ever yields two
+    already-connected descriptors and can never reach a remote host. It still has
+    to be exempted, because on Windows CPython emulates it in pure Python using
+    two real ``socket.connect()`` calls against a loopback address, and asyncio
+    builds an event loop's self-pipe with it. Without this exemption the guard
+    breaks event-loop construction and every async test errors during setup.
+    """
+    with patch.object(socket.socket, "connect", _REAL_SOCKET_CONNECT, create=True), patch.object(
+        socket.socket, "connect_ex", _REAL_SOCKET_CONNECT_EX, create=True
+    ):
+        return _REAL_SOCKETPAIR(*args, **kwargs)
+
+
 @pytest.fixture(autouse=True)
 def _no_outbound_network(request: pytest.FixtureRequest) -> Iterator[None]:
     """Fails fast if SQLite-backed tests open a socket.
@@ -157,6 +180,9 @@ def _no_outbound_network(request: pytest.FixtureRequest) -> Iterator[None]:
         )
         stack.enter_context(
             patch.object(socket.socket, "connect_ex", side_effect=_blocked, create=True)
+        )
+        stack.enter_context(
+            patch("socket.socketpair", side_effect=_loopback_socketpair, create=True)
         )
         yield
 

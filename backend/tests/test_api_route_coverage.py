@@ -12,7 +12,7 @@ The gaps closed here are:
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -280,8 +280,8 @@ async def test_token_without_a_subject_is_rejected(client):
 
     from app.core.config import settings
 
-    token = jwt.encode({"exp": datetime.now() + timedelta(hours=1)}, settings.SECRET_KEY,
-                       algorithm=settings.ALGORITHM)
+    token = jwt.encode({"exp": datetime.now(timezone.utc) + timedelta(hours=1)},
+                       settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     res = await client.get("/api/v1/auth/me", headers=_auth(token))
     assert res.status_code == 401
 
@@ -301,7 +301,8 @@ async def test_expired_token_is_rejected(client, registered_user):
     from app.core.config import settings
 
     token = jwt.encode(
-        {"sub": registered_user["user_id"], "exp": datetime.now() - timedelta(hours=1)},
+        {"sub": registered_user["user_id"],
+         "exp": datetime.now(timezone.utc) - timedelta(hours=1)},
         settings.SECRET_KEY,
         algorithm=settings.ALGORITHM,
     )

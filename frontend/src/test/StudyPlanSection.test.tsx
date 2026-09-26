@@ -94,8 +94,12 @@ describe("StudyPlanSection plan rendering", () => {
 
     render(<StudyPlanSection subjects={[chemistry]} />);
 
-    // Once in the subject <select> and once in the plan header.
-    expect(await screen.findAllByText("Organic Chemistry")).toHaveLength(2);
+    // Once in the subject <select> and once in the plan header. The <select>
+    // renders before the plan is fetched, so wait for the header to appear
+    // rather than letting findAllByText resolve against the option alone.
+    await waitFor(() =>
+      expect(screen.getAllByText("Organic Chemistry")).toHaveLength(2),
+    );
     expect(screen.getByText(/^Generated /)).toBeInTheDocument();
     expect(screen.getByText(/45 min planned/)).toBeInTheDocument();
     expect(screen.getByText("Session 1")).toBeInTheDocument();
@@ -296,6 +300,8 @@ describe("StudyPlanSection deep links", () => {
   it("links LEARN items to the materials view", async () => {
     getLatestStudyPlan.mockResolvedValue(
       makeStudyPlan({
+        subject_id: chemistry.id,
+        subject_title: chemistry.title,
         sessions: [
           {
             ...makeStudyPlan().sessions[0],
@@ -314,6 +320,8 @@ describe("StudyPlanSection deep links", () => {
   it("links non-LEARN items to practice without the materials focus", async () => {
     getLatestStudyPlan.mockResolvedValue(
       makeStudyPlan({
+        subject_id: chemistry.id,
+        subject_title: chemistry.title,
         sessions: [
           {
             ...makeStudyPlan().sessions[0],
