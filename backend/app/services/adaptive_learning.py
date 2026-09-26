@@ -31,6 +31,8 @@ computed from four measurable signals:
     importance = 1 / (1 + days_since_last_attempt / 7)
     Recent weak performance raises priority; a strong recent result shrinks it,
     which avoids recommending effortless repetition of already-hot topics.
+    When either input is unknown the whole term drops out, so missing data is
+    never scored as weak recent performance.
 
 Weights are constants chosen so the total stays within 0-100 after evidence
 gating: w_weakness = 0.45, w_error = 0.35, w_recency = 0.20.
@@ -159,8 +161,21 @@ def error_component(incorrect: int, attempted: int) -> float:
     )
 
 
-def recency_component(days: Optional[float], recent_accuracy: float) -> float:
-    importance = 0.0 if days is None else 1.0 / (1.0 + days / RECENCY_HALF_LIFE_DAYS)
+def recency_component(
+    days: Optional[float], recent_accuracy: Optional[float]
+) -> float:
+    """Recency contribution, or 0.0 when either input is unknown.
+
+    A missing ``days`` and a missing ``recent_accuracy`` both mean "not
+    measured", and neither may be read as evidence of weak recent
+    performance. Substituting 0.0 for an unknown accuracy would make
+    ``importance * (1 - 0) == importance``, i.e. it would hand the largest
+    possible recency boost to exactly those topics that have no recent
+    answers at all.
+    """
+    if days is None or recent_accuracy is None:
+        return 0.0
+    importance = 1.0 / (1.0 + days / RECENCY_HALF_LIFE_DAYS)
     return importance * (1.0 - recent_accuracy)
 
 
@@ -174,7 +189,7 @@ def priority_score(metrics: TopicMetrics) -> float:
     recent_accuracy = (
         metrics.recent_correct / metrics.recent_attempted
         if metrics.recent_attempted
-        else 0.0
+        else None
     )
     blended = (
         W_WEAKNESS * weakness_component(accuracy)
@@ -207,21 +222,25 @@ def recommendation_type_and_reason(metrics: TopicMetrics) -> Tuple[str, str]:
         accuracy_pct < REVIEW_ACCURACY_THRESHOLD
         and attempted >= MIN_REVIEW_EVIDENCE
     )
-    low_mastery_with_attempts = metrics.mastery_score < WEAK_MASTERY and metrics.attempts >= 2
+    # Judged on accuracy, not on ``mastery_score``: the stored mastery is scaled
+    # by the confidence gate (mastery = accuracy * min(1, attempted /
+    # EVIDENCE_TARGET) * 100), so a short but flawless history scores below
+    # WEAK_MASTERY and would otherwise be reported as needing review.
+    low_ability_with_attempts = accuracy_pct < WEAK_MASTERY and metrics.attempts >= 2
     recent_decline = (
         metrics.recent_attempted >= 2
         and recent_accuracy is not None
         and recent_accuracy < overall_accuracy - 0.05
     )
 
-    if low_accuracy or repeated or low_mastery_with_attempts:
+    if low_accuracy or repeated or low_ability_with_attempts:
         if recent_decline:
             return REVIEW, "Recent performance has declined."
         if repeated:
             return REVIEW, "Repeated incorrect answers on this topic."
         if low_accuracy:
             return REVIEW, f"Low accuracy ({accuracy_pct}%) across {attempted} questions."
-        return REVIEW, "Mastery is low despite multiple practice attempts."
+        return REVIEW, "Low accuracy on this topic despite multiple practice attempts."
 
     if accuracy_pct >= MIN_MAINTAIN_ACCURACY:
         return MAINTAIN, f"Strong accuracy ({accuracy_pct}%) across {attempted} questions."

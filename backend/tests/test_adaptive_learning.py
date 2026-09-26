@@ -14,6 +14,12 @@ from app.models.subject import Subject
 from app.rag.embeddings import embedding_service
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
+from app.services.adaptive_learning import (
+    TopicMetrics,
+    priority_score,
+    recency_component,
+    recommendation_type_and_reason,
+)
 from app.services.student_intelligence import (
     compute_accuracy,
     compute_mastery,
@@ -219,6 +225,70 @@ async def _subject_recs(ac: AsyncClient, token: str, subject_id: str, limit: int
     if limit is not None:
         url = f"{url}?limit={limit}"
     return await ac.get(url, headers=_auth(token))
+
+
+async def _seed_mastery_only(
+    user_id: str,
+    subject_id: str,
+    topic: str,
+    *,
+    attempted: int,
+    correct: int,
+    last_attempt_at: datetime,
+) -> None:
+    """Seeds a TopicMastery row carrying counters but no answer rows.
+
+    Leaves the recent-answer window empty while keeping the topic visible to
+    the engine, which is the case the recency term has to score correctly.
+    """
+    mastery_score = compute_mastery(correct, attempted)
+    async with TestAsyncSessionLocal() as session:
+        session.add(
+            TopicMastery(
+                user_id=uuid.UUID(user_id),
+                subject_id=uuid.UUID(subject_id),
+                topic=topic,
+                attempts=1,
+                questions_attempted=attempted,
+                questions_correct=correct,
+                questions_incorrect=attempted - correct,
+                accuracy=compute_accuracy(correct, attempted),
+                mastery_score=mastery_score,
+                mastery_level=mastery_level(mastery_score),
+                last_attempt_at=last_attempt_at,
+            )
+        )
+        await session.commit()
+
+
+def _metrics(
+    topic: str,
+    *,
+    attempts: int,
+    attempted: int,
+    correct: int,
+    last_attempt_at: datetime,
+    recent_attempted: int = 0,
+    recent_correct: int = 0,
+) -> TopicMetrics:
+    """Builds self-consistent metrics, deriving accuracy and mastery from counters
+    exactly as the quiz-submission path stores them."""
+    mastery_score = compute_mastery(correct, attempted)
+    return TopicMetrics(
+        subject_id=uuid.uuid4(),
+        subject_title="Unit Subject",
+        topic=topic,
+        attempts=attempts,
+        questions_attempted=attempted,
+        questions_correct=correct,
+        questions_incorrect=attempted - correct,
+        accuracy=compute_accuracy(correct, attempted),
+        mastery_score=mastery_score,
+        mastery_level=mastery_level(mastery_score),
+        last_attempt_at=last_attempt_at,
+        recent_attempted=recent_attempted,
+        recent_correct=recent_correct,
+    )
 
 
 PASS_TEXTS = [
@@ -528,3 +598,183 @@ async def test_empty_recommendations_for_new_user():
 
         subject = (await _subject_recs(ac, token, subject_id)).json()
         assert subject == []
+
+
+# ---------------------------------------------------------------------------
+# Regression: a confidence-gated mastery score must not decide the action
+# ---------------------------------------------------------------------------
+
+
+def test_short_but_flawless_history_is_not_recommended_for_review():
+    """A flawless history is MAINTAIN, even though the confidence-gated mastery
+    score sits below WEAK_MASTERY purely because only two questions exist."""
+    metrics = _metrics(
+        "Flawless", attempts=2, attempted=2, correct=2, last_attempt_at=datetime.utcnow()
+    )
+
+    # The precondition that used to force REVIEW: mastery below the weak
+    # boundary while accuracy is perfect.
+    assert metrics.mastery_score == 20.0
+    assert metrics.accuracy == 100.0
+
+    recommendation_type, _ = recommendation_type_and_reason(metrics)
+    assert recommendation_type == "MAINTAIN"
+
+
+def test_flawless_history_is_never_reviewed_at_any_evidence_level():
+    now = datetime.utcnow()
+    for attempted in (1, 2, 3, 5, 8, 10, 20):
+        metrics = _metrics(
+            f"Flawless{attempted}",
+            attempts=2,
+            attempted=attempted,
+            correct=attempted,
+            last_attempt_at=now,
+        )
+        recommendation_type, _ = recommendation_type_and_reason(metrics)
+        assert recommendation_type != "REVIEW", (
+            f"{attempted} flawless answers were recommended for review "
+            f"(mastery {metrics.mastery_score})"
+        )
+
+
+def test_low_accuracy_across_attempts_is_still_recommended_for_review():
+    """The rule the fix had to preserve: genuinely weak topics are still REVIEW."""
+    metrics = _metrics(
+        "AllWrong",
+        attempts=2,
+        attempted=2,
+        correct=0,
+        last_attempt_at=datetime.utcnow(),
+    )
+
+    recommendation_type, reason = recommendation_type_and_reason(metrics)
+    assert recommendation_type == "REVIEW"
+    assert "Low accuracy" in reason
+
+
+def test_short_history_above_the_weak_boundary_is_practice_not_review():
+    """Half-correct over two questions is insufficient evidence, not a review
+    demand — the same conclusion Phase 6 reaches via ``insufficient_evidence``."""
+    metrics = _metrics(
+        "HalfCorrect",
+        attempts=2,
+        attempted=2,
+        correct=1,
+        last_attempt_at=datetime.utcnow(),
+    )
+
+    recommendation_type, reason = recommendation_type_and_reason(metrics)
+    assert recommendation_type == "PRACTICE"
+    assert "Not enough questions yet" in reason
+
+
+@pytest.mark.asyncio
+async def test_api_keeps_a_flawless_short_history_out_of_review():
+    """End-to-end guard for the reported case: two attempts and three flawless
+    answers must not be served as a REVIEW recommendation."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        token, user_id = await _register(ac, "adaptive_flawless@example.com")
+        subject_id = await _create_subject(ac, token, "Flawless Subject")
+        await _seed_chunks(user_id, subject_id, "Flawless.pdf", PASS_TEXTS)
+
+        first = (await _generate(ac, token, subject_id, question_count=2, topic="Flawless")).json()
+        await _submit_all(ac, token, first, correct=True)
+        second = (await _generate(ac, token, subject_id, question_count=1, topic="Flawless")).json()
+        await _submit_all(ac, token, second, correct=True)
+
+        recs = (await _top(ac, token, limit=10)).json()
+        flawless = next(r for r in recs if r["topic"] == "Flawless")
+
+        # The exact state that used to be misreported as REVIEW.
+        assert flawless["attempts"] == 2
+        assert flawless["questions_attempted"] == 3
+        assert flawless["accuracy"] == 100.0
+        assert flawless["mastery"] < 40.0
+        assert flawless["recommendation_type"] != "REVIEW"
+        assert flawless["recommendation_type"] == "MAINTAIN"
+
+
+# ---------------------------------------------------------------------------
+# Regression: missing recent evidence must not be scored as weak evidence
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_recent_evidence_contributes_no_recency():
+    assert recency_component(0.0, None) == 0.0
+    assert recency_component(None, 0.0) == 0.0
+    assert recency_component(None, None) == 0.0
+    # A measured input still behaves exactly as documented.
+    assert recency_component(0.0, 0.0) == 1.0
+    assert recency_component(0.0, 1.0) == 0.0
+
+
+def test_missing_recent_answers_do_not_raise_priority():
+    """A topic with no recent answers must score like one whose recent answers
+    were all correct: no evidence is not the worst evidence."""
+    now = datetime.utcnow()
+    without_recent = _metrics(
+        "NoRecent", attempts=2, attempted=5, correct=5, last_attempt_at=now
+    )
+    with_perfect_recent = _metrics(
+        "PerfectRecent",
+        attempts=2,
+        attempted=5,
+        correct=5,
+        last_attempt_at=now,
+        recent_attempted=5,
+        recent_correct=5,
+    )
+
+    assert priority_score(without_recent) == priority_score(with_perfect_recent)
+
+
+def test_weak_recent_performance_still_raises_priority():
+    now = datetime.utcnow()
+    strong_recent = _metrics(
+        "StrongRecent",
+        attempts=2,
+        attempted=5,
+        correct=5,
+        last_attempt_at=now,
+        recent_attempted=5,
+        recent_correct=5,
+    )
+    weak_recent = _metrics(
+        "WeakRecent",
+        attempts=2,
+        attempted=5,
+        correct=5,
+        last_attempt_at=now,
+        recent_attempted=5,
+        recent_correct=0,
+    )
+
+    assert priority_score(weak_recent) > priority_score(strong_recent)
+
+
+@pytest.mark.asyncio
+async def test_api_scores_a_topic_without_recent_answers_like_a_strong_one():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        token, user_id = await _register(ac, "adaptive_recent@example.com")
+        subject_id = await _create_subject(ac, token, "Recent Subject")
+
+        now = datetime.utcnow()
+        await _seed_mastery_only(
+            user_id,
+            subject_id,
+            "NoRecent",
+            attempted=5,
+            correct=5,
+            last_attempt_at=now,
+        )
+        await _seed_topic_history(
+            user_id, subject_id, "PerfectRecent", [(True, now)] * 5
+        )
+
+        recs = (await _top(ac, token, limit=10)).json()
+        by_topic = {r["topic"]: r for r in recs}
+
+        assert by_topic["NoRecent"]["priority"] == by_topic["PerfectRecent"]["priority"]
+        assert by_topic["NoRecent"]["questions_attempted"] == 5
+        assert by_topic["NoRecent"]["accuracy"] == 100.0
