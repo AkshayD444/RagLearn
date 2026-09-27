@@ -27,3 +27,22 @@ class DocumentRead(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentStatusRead(BaseModel):
+    """Just enough to drive a poll loop: where the document is and why not.
+
+    Deliberately narrower than :class:`DocumentRead` so a client can poll it
+    cheaply. ``chunk_count`` is what actually tells a student their material
+    became searchable, and ``error_message`` is what a FAILED document needs to
+    explain itself and offer a retry.
+    """
+
+    id: uuid.UUID
+    subject_id: uuid.UUID
+    status: str
+    error_message: Optional[str] = None
+    chunk_count: int = 0
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

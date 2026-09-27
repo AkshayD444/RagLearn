@@ -73,6 +73,61 @@ async def get_subject(
     return subject
 
 
+@router.patch("/{subject_id}", response_model=SubjectRead)
+async def update_subject(
+    subject_id: uuid.UUID,
+    subject_in: SubjectUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Partially updates an active subject owned by the current user.
+
+    Only the fields present in the request body are touched, so renaming a
+    subject cannot silently wipe its description. An empty body is a no-op
+    rather than an error.
+    """
+    result = await db.execute(
+        select(Subject).where(
+            Subject.id == subject_id,
+            Subject.user_id == current_user.id,
+            Subject.deleted_at.is_(None),
+        )
+    )
+    subject = result.scalar_one_or_none()
+    if not subject:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subject not found."
+        )
+
+    changes = subject_in.model_dump(exclude_unset=True)
+
+    if "title" in changes:
+        title = (changes["title"] or "").strip()
+        if not title:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Title cannot be empty."
+            )
+        subject.title = title
+
+    if "description" in changes:
+        subject.description = (changes["description"] or "").strip()
+
+    if "color" in changes:
+        color = (changes["color"] or "").strip()
+        if not color:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Color cannot be empty."
+            )
+        subject.color = color
+
+    await db.commit()
+    await db.refresh(subject)
+    return subject
+
+
 @router.delete("/{subject_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_subject(
     subject_id: uuid.UUID,

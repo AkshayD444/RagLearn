@@ -2,10 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/api";
 import {
+  makeAnalyticsOverview,
+  makeDocumentStatus,
   makeFlashcardDeck,
   makeFlashcardDeckSummary,
   makeFlashcardReviewSummary,
   makeFlashcardTopicProgress,
+  makePage,
+  makeQuizAttemptSummary,
+  makeQuizSummary,
+  makeSubject,
 } from "@/test/factories";
 
 /**
@@ -409,5 +415,137 @@ describe("api flashcard endpoints", () => {
     await expect(api.generateFlashcards("subject-1", 5)).rejects.toThrow(
       "No processed documents found for this subject.",
     );
+  });
+});
+
+describe("api: subject updates", () => {
+  it("patches only the fields the caller changed", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(makeSubject({ title: "Renamed" })));
+
+    const result = await api.updateSubject("subject-1", { title: "Renamed" });
+
+    expect(result.title).toBe("Renamed");
+    const [url, call] = lastCall();
+    expect(url).toBe(`${BASE}/subjects/subject-1`);
+    expect(call.method).toBe("PATCH");
+    expect(JSON.parse(call.body as string)).toEqual({ title: "Renamed" });
+  });
+
+  it("omits a field that was left undefined", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(makeSubject()));
+
+    await api.updateSubject("subject-1", { title: "Kept", description: undefined });
+
+    expect(JSON.parse(lastCall()[1].body as string)).toEqual({ title: "Kept" });
+  });
+
+  it("propagates a validation failure", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ detail: "Title must not be blank." }, 422));
+
+    await expect(api.updateSubject("subject-1", { title: "   " })).rejects.toThrow(
+      "Title must not be blank.",
+    );
+  });
+});
+
+describe("api: document status and reprocessing", () => {
+  it("reads the compact polling status", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(makeDocumentStatus({ chunk_count: 12 })));
+
+    const result = await api.getDocumentStatus("doc-1");
+
+    expect(result.chunk_count).toBe(12);
+    const [url, call] = lastCall();
+    expect(url).toBe(`${BASE}/documents/doc-1/status`);
+    // Left as the fetch default rather than a bodyless explicit POST.
+    expect(call.method).toBeUndefined();
+  });
+
+  it("posts the reprocess request and returns the new status", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(makeDocumentStatus({ status: "PROCESSING" })),
+    );
+
+    const result = await api.reprocessDocument("doc-1");
+
+    expect(result.status).toBe("PROCESSING");
+    const [url, call] = lastCall();
+    expect(url).toBe(`${BASE}/documents/doc-1/reprocess`);
+    expect(call.method).toBe("POST");
+  });
+
+  it("surfaces the 409 raised while a document is still processing", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ detail: "Document is still being processed." }, 409),
+    );
+
+    await expect(api.reprocessDocument("doc-1")).rejects.toThrow(
+      "Document is still being processed.",
+    );
+  });
+});
+
+describe("api: bounded history and analytics", () => {
+  it("passes an explicit limit and offset through as query parameters", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(makePage([makeQuizSummary()])));
+
+    await api.getQuizzes({ subjectId: "subject-1", limit: 20, offset: 40 });
+
+    const url = new URL(lastCall()[0]);
+    expect(url.pathname).toBe("/api/v1/quizzes");
+    expect(url.searchParams.get("subject_id")).toBe("subject-1");
+    expect(url.searchParams.get("limit")).toBe("20");
+    expect(url.searchParams.get("offset")).toBe("40");
+  });
+
+  it("omits the subject filter when the list is not scoped", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(makePage([])));
+
+    await api.getQuizzes();
+
+    const url = new URL(lastCall()[0]);
+    expect(url.searchParams.has("subject_id")).toBe(false);
+    expect(url.searchParams.has("limit")).toBe(false);
+    expect(url.searchParams.has("offset")).toBe(false);
+  });
+
+  it("exposes has_more so the UI can bound its own paging", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(makePage([makeQuizSummary()], { total: 40, limit: 20, offset: 0 })),
+    );
+
+    const page = await api.getQuizzes({ limit: 20, offset: 0 });
+
+    expect(page.has_more).toBe(true);
+    expect(page.total).toBe(40);
+  });
+
+  it("reads quiz attempts with the same paging envelope", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(makePage([makeQuizAttemptSummary()])));
+
+    const page = await api.getQuizAttempts({ limit: 5, offset: 0 });
+
+    expect(page.items[0].quiz_id).toBe("99999999-9999-4999-8999-999999999999");
+    const url = new URL(lastCall()[0]);
+    expect(url.pathname).toBe("/api/v1/quizzes/attempts");
+    expect(url.searchParams.get("limit")).toBe("5");
+  });
+
+  it("requests the analytics overview and returns the aggregate", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(makeAnalyticsOverview()));
+
+    const overview = await api.getAnalyticsOverview({ subjectId: "subject-1", limit: 50 });
+
+    expect(overview.totals.attempt_count).toBe(3);
+    const url = new URL(lastCall()[0]);
+    expect(url.pathname).toBe("/api/v1/analytics/overview");
+    expect(url.searchParams.get("subject_id")).toBe("subject-1");
+    expect(url.searchParams.get("limit")).toBe("50");
+  });
+
+  it("surfaces a forbidden overview instead of returning an empty aggregate", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ detail: "Not found." }, 404));
+
+    await expect(api.getAnalyticsOverview()).rejects.toThrow("Not found.");
   });
 });

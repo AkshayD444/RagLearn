@@ -3,7 +3,7 @@ import os
 import shutil
 from typing import List, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Response
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user
@@ -11,7 +11,7 @@ from app.models.user import User
 from app.models.subject import Subject
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
-from app.schemas.document import DocumentRead
+from app.schemas.document import DocumentRead, DocumentStatusRead
 from app.rag.document_processor import process_document_file
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -200,6 +200,101 @@ async def get_document(
         chunk_count=chunk_count,
         created_at=doc.created_at
     )
+
+
+def _to_status_read(doc: Document, chunk_count: int) -> DocumentStatusRead:
+    return DocumentStatusRead(
+        id=doc.id,
+        subject_id=doc.subject_id,
+        status=doc.status,
+        error_message=doc.error_message,
+        chunk_count=chunk_count,
+        created_at=doc.created_at,
+    )
+
+
+async def _load_owned_document(
+    db: AsyncSession, document_id: uuid.UUID, current_user: User
+) -> Document:
+    res = await db.execute(
+        select(Document).where(
+            Document.id == document_id,
+            Document.user_id == current_user.id,
+        )
+    )
+    doc = res.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found."
+        )
+    return doc
+
+
+@router.get("/{document_id}/status", response_model=DocumentStatusRead)
+async def get_document_status(
+    document_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Cheap poll target for a single document's processing state.
+
+    Returns only what a status loop needs, so a client can watch an upload
+    finish without re-listing every document in the subject.
+    """
+    doc = await _load_owned_document(db, document_id, current_user)
+    chunk_count = await db.scalar(
+        select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == doc.id)
+    )
+    return _to_status_read(doc, int(chunk_count or 0))
+
+
+@router.post("/{document_id}/reprocess", response_model=DocumentStatusRead)
+async def reprocess_document(
+    document_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> Any:
+    """Re-runs extraction and embedding for an owned document.
+
+    The existing row is reused: a retry must never leave a duplicate document
+    behind, or the subject would show the same PDF twice. Stale chunks from a
+    previous run are dropped and the row is returned to PROCESSING, so the
+    previous outcome stays visible until the retry actually lands somewhere.
+    """
+    doc = await _load_owned_document(db, document_id, current_user)
+
+    if doc.status == "PROCESSING":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Document is already being processed."
+        )
+
+    if not doc.file_path or not os.path.exists(doc.file_path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The stored file is no longer available on the server. Please upload the PDF again."
+        )
+
+    # Drop chunks from the previous run so a partial reprocess cannot leave
+    # superseded embeddings queryable. process_document_file would remove them
+    # too, but only after the new extraction succeeds.
+    await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc.id))
+    doc.status = "PROCESSING"
+    doc.error_message = None
+    await db.commit()
+    await db.refresh(doc)
+
+    background_tasks.add_task(
+        process_document_file,
+        document_id=doc.id,
+        file_path=doc.file_path,
+        subject_id=doc.subject_id,
+        user_id=current_user.id
+    )
+
+    return _to_status_read(doc, 0)
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)

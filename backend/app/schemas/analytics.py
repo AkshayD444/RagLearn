@@ -78,3 +78,72 @@ class WeakTopicRead(BaseModel):
     questions_incorrect: int
     reasons: List[WeakReasonRead] = Field(default_factory=list)
     last_attempt_at: Optional[datetime] = None
+
+
+# ---------------------------------------------------------------------------
+# Cross-subject overview
+# ---------------------------------------------------------------------------
+
+
+class LearningTotals(BaseModel):
+    """Lifetime totals for a student's learning, aggregated in the database.
+
+    Every figure is a SQL aggregate over the student's own rows, so the numbers
+    describe the whole history regardless of how many rows exist. ``accuracy``
+    and ``average_percentage`` are both 0-100.
+    """
+
+    subject_count: int = 0
+    quiz_count: int = 0
+    attempt_count: int = 0
+    questions_answered: int = 0
+    questions_correct: int = 0
+    questions_incorrect: int = 0
+    accuracy: float = 0.0
+    average_percentage: float = 0.0
+    best_percentage: float = 0.0
+    first_activity_at: Optional[datetime] = None
+    last_activity_at: Optional[datetime] = None
+
+
+class LearningTimelineEntry(BaseModel):
+    """One row of the progress timeline: a single completed attempt.
+
+    The quiz and subject titles are joined in rather than looked up, so a
+    timeline entry is renderable on its own.
+    """
+
+    id: uuid.UUID
+    quiz_id: uuid.UUID
+    quiz_title: str
+    subject_id: uuid.UUID
+    subject_title: str
+    score: int
+    total_questions: int
+    percentage: float
+    completed_at: datetime
+
+
+class SubjectActivity(BaseModel):
+    """Per-subject rollup for the overview, ordered by most recent activity."""
+
+    subject_id: uuid.UUID
+    subject_title: str
+    attempt_count: int = 0
+    average_percentage: float = 0.0
+    best_percentage: float = 0.0
+    last_attempt_at: Optional[datetime] = None
+
+
+class AnalyticsOverviewRead(BaseModel):
+    """Dashboard-level learning history: totals, a bounded timeline, the
+    subjects with activity, and the topics most in need of work.
+
+    The three lists are each capped by the request's ``limit``; ``totals`` always
+    describes the entire history.
+    """
+
+    totals: LearningTotals = Field(default_factory=LearningTotals)
+    timeline: List[LearningTimelineEntry] = Field(default_factory=list)
+    subjects: List[SubjectActivity] = Field(default_factory=list)
+    weakest_topics: List[TopicMasteryRead] = Field(default_factory=list)

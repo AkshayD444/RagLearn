@@ -119,3 +119,78 @@ describe("DocumentList", () => {
     expect(onDelete).toHaveBeenCalledWith("second-doc");
   });
 });
+
+describe("DocumentList reprocessing", () => {
+  it("offers a retry for a failed document and reports the row id", () => {
+    const onReprocess = vi.fn();
+
+    render(
+      <DocumentList
+        documents={[makeDocument({ id: "doc-1", title: "broken.pdf", status: "FAILED" })]}
+        onDelete={vi.fn()}
+        onReprocess={onReprocess}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onReprocess).toHaveBeenCalledWith("doc-1");
+  });
+
+  it("surfaces the failure reason that processing recorded", () => {
+    render(
+      <DocumentList
+        documents={[
+          makeDocument({ status: "FAILED", error_message: "Unsupported file type." }),
+        ]}
+        onDelete={vi.fn()}
+        onReprocess={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Unsupported file type.")).toBeInTheDocument();
+  });
+
+  it("disables only the row being retried", () => {
+    const onReprocess = vi.fn();
+
+    render(
+      <DocumentList
+        documents={[
+          makeDocument({ id: "doc-1", status: "FAILED" }),
+          makeDocument({ id: "doc-2", status: "FAILED" }),
+        ]}
+        onDelete={vi.fn()}
+        onReprocess={onReprocess}
+        reprocessingId="doc-1"
+      />,
+    );
+
+    const buttons = screen.getAllByRole("button", { name: "Retry" });
+    expect(buttons[0]).toBeDisabled();
+    expect(buttons[1]).toBeEnabled();
+  });
+
+  it("stays read-only when no retry handler is wired up", () => {
+    render(
+      <DocumentList
+        documents={[makeDocument({ status: "FAILED" })]}
+        onDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Extraction Failed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer a retry for a document that is still processing", () => {
+    render(
+      <DocumentList
+        documents={[makeDocument({ status: "PROCESSING" })]}
+        onDelete={vi.fn()}
+        onReprocess={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+});

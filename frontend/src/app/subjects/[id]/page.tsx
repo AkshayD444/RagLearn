@@ -1,15 +1,16 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
-import { api, Subject, Document } from "@/lib/api";
+import { api, Subject, Document, DocumentStatus } from "@/lib/api";
 import { DocumentUploader } from "@/components/documents/DocumentUploader";
 import { DocumentList } from "@/components/documents/DocumentList";
 import { RagTutor } from "@/components/rag/RagTutor";
 import { QuizSection } from "@/components/quiz/QuizSection";
 import { FlashcardSection } from "@/components/flashcards/FlashcardSection";
 import { StudentIntelligence } from "@/components/analytics/StudentIntelligence";
+import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import { 
   ArrowLeft, 
   BookOpen, 
@@ -18,10 +19,28 @@ import {
   Sparkles, 
   FileText,
   Layers,
-  HelpCircle,
   FolderOpen,
   Activity
 } from "lucide-react";
+
+/**
+ * How often a document still being processed is checked.
+ *
+ * Processing is server-side background work with no push channel, so polling is
+ * the honest option. The delay is a guess: a document that finishes in 200ms
+ * would sit on a fixed 2s wait, and a slow one would still read as stuck.
+ */
+const PROCESS_POLL_INTERVAL_MS = 2000;
+
+/**
+ * The hard stop on that poll.
+ *
+ * Without a ceiling a document stuck in PROCESSING would keep the timer alive
+ * for the life of the page. After roughly half a minute the loop gives up and
+ * the row keeps its last known state; the Retry and manual refresh paths stay
+ * available, and any run still in flight will show up on the next load.
+ */
+const PROCESS_POLL_MAX_TICKS = 15;
 
 export default function SubjectDetailPage() {
   const params = useParams();
@@ -35,17 +54,36 @@ export default function SubjectDetailPage() {
   const [subject, setSubject] = useState<Subject | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reprocessingId, setReprocessingId] = useState<string | null>(null);
   const [performanceRefreshKey, setPerformanceRefreshKey] = useState(0);
+
+  const pollTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
 
   useEffect(() => {
     initialize();
   }, [initialize]);
 
+  // Auth has to settle before it is meaningful to fetch: `isLoading` starts
+  // true, and without a token there is nothing to load, so the spinner would
+  // otherwise never stop.
   useEffect(() => {
     if (token && subjectId) {
       fetchSubjectData();
+    } else if (!token) {
+      setIsLoading(false);
     }
   }, [token, subjectId]);
+
+  // Clear any in-flight poll timers on unmount so a status loop cannot outlive
+  // the page that started it.
+  useEffect(() => {
+    const timers = pollTimers.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.length = 0;
+    };
+  }, []);
 
   const fetchSubjectData = async () => {
     setIsLoading(true);
@@ -56,19 +94,89 @@ export default function SubjectDetailPage() {
       ]);
       setSubject(subjData);
       setDocuments(docsData);
-    } catch (err) {
+      setLoadError(null);
+      // Documents that were already mid-ingest when the page loaded still need
+      // watching, otherwise a refresh would freeze them on "Chunking...".
+      docsData
+        .filter((doc) => doc.status === "PROCESSING")
+        .forEach((doc) => watchDocument(doc.id));
+    } catch (err: any) {
       console.error("Failed to load subject details:", err);
+      setLoadError(err.message || "Failed to load this subject.");
     } finally {
       setIsLoading(false);
     }
   };
 
+  /**
+   * Applies the result of one status read to the matching row in local state.
+   *
+   * Only the status fields are copied, so a poll never has to refetch the whole
+   * document list or clobber unrelated rows.
+   */
+  const applyStatus = useCallback((docId: string, status: DocumentStatus) => {
+    setDocuments((prev) =>
+      prev.map((doc) =>
+        doc.id === docId
+          ? {
+              ...doc,
+              status: status.status,
+              error_message: status.error_message ?? null,
+              chunk_count: status.chunk_count,
+            }
+          : doc,
+      ),
+    );
+  }, []);
+
+  /**
+   * Polls one document until it leaves PROCESSING, or the tick ceiling is hit.
+   *
+ * Each step asks only the status endpoint, so the loop is cheap and bounded on
+ * both axes: one document at a time, and a fixed number of attempts. A
+ * transient failure ends the loop rather than retrying forever; the row keeps
+ * its last known state, and the Retry button or a reload restarts tracking.
+   */
+  const watchDocument = useCallback(
+    (docId: string, tick = 0) => {
+      if (tick >= PROCESS_POLL_MAX_TICKS) return;
+
+      pollTimers.current.push(
+        setTimeout(async () => {
+          let status: DocumentStatus;
+          try {
+            status = await api.getDocumentStatus(docId);
+          } catch {
+            return;
+          }
+          applyStatus(docId, status);
+          if (status.status === "PROCESSING") {
+            watchDocument(docId, tick + 1);
+          }
+        }, PROCESS_POLL_INTERVAL_MS),
+      );
+    },
+    [applyStatus],
+  );
+
   const handleDocumentUploaded = (newDoc: Document) => {
     setDocuments((prev) => [newDoc, ...prev]);
-    // Refresh documents after 2s to check processing status
-    setTimeout(() => {
-      api.getSubjectDocuments(subjectId).then(setDocuments).catch(() => {});
-    }, 2500);
+    watchDocument(newDoc.id);
+  };
+
+  const handleReprocessDocument = async (docId: string) => {
+    setReprocessingId(docId);
+    try {
+      const status = await api.reprocessDocument(docId);
+      applyStatus(docId, status);
+      setLoadError(null);
+      watchDocument(docId);
+    } catch (err: any) {
+      console.error("Failed to reprocess document:", err);
+      setLoadError(err.message || "Failed to process this document again.");
+    } finally {
+      setReprocessingId(null);
+    }
   };
 
   const handleDeleteDocument = async (docId: string) => {
@@ -102,11 +210,26 @@ export default function SubjectDetailPage() {
 
   if (!subject) {
     return (
-      <div className="min-h-screen bg-slate-950 p-8 text-center text-slate-300">
-        <p>Subject not found.</p>
+      <div className="min-h-screen bg-slate-950 p-8 text-center text-slate-300 space-y-4">
+        {/* A failed fetch and a genuinely missing subject look identical if only
+            `subject` is checked, so the captured error decides which one this is
+            and only the recoverable case offers a retry. */}
+        {loadError ? (
+          <>
+            <ErrorBanner message={loadError} />
+            <button
+              onClick={fetchSubjectData}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white"
+            >
+              Try again
+            </button>
+          </>
+        ) : (
+          <p>Subject not found.</p>
+        )}
         <button
           onClick={() => router.push("/dashboard")}
-          className="mt-4 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white"
+          className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white"
         >
           Back to Dashboard
         </button>
@@ -237,10 +360,13 @@ export default function SubjectDetailPage() {
             onUploadSuccess={handleDocumentUploaded}
           />
 
-          <div className="pt-4">
+          <div className="pt-4 space-y-3">
+            {loadError && <ErrorBanner message={loadError} />}
             <DocumentList
               documents={documents}
               onDelete={handleDeleteDocument}
+              onReprocess={handleReprocessDocument}
+              reprocessingId={reprocessingId}
             />
           </div>
         </div>

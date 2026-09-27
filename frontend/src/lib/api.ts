@@ -22,12 +22,34 @@ export interface Subject {
   created_at: string;
 }
 
+export interface SubjectUpdate {
+  title?: string;
+  description?: string;
+  color?: string;
+}
+
 export interface Document {
   id: string;
   subject_id: string;
   user_id: string;
   title: string;
   file_size_bytes: number;
+  status: "PROCESSING" | "READY" | "FAILED";
+  error_message?: string | null;
+  chunk_count: number;
+  created_at: string;
+}
+
+/**
+ * The narrow projection a status poll needs.
+ *
+ * Deliberately smaller than {@link Document}: a client watching an upload finish
+ * asks for this on a timer, so it should not re-transfer the title, the byte
+ * count, or anything else that does not change while processing runs.
+ */
+export interface DocumentStatus {
+  id: string;
+  subject_id: string;
   status: "PROCESSING" | "READY" | "FAILED";
   error_message?: string | null;
   chunk_count: number;
@@ -115,6 +137,84 @@ export interface QuizResultResponse {
   results: QuestionResult[];
 }
 
+/**
+ * One page of a history listing.
+ *
+ * `total` counts the whole filtered collection, not this page, and `has_more` is
+ * derived from it. Callers can therefore never mistake a bounded page for the
+ * full history and paginate correctly from either field.
+ */
+export interface Page<T> {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
+/**
+ * A quiz as listed in history: metadata plus how the student did on it.
+ *
+ * The attempt figures cover the whole history for this quiz, so they stay
+ * correct on whichever page the quiz happens to appear.
+ */
+export interface QuizSummary {
+  id: string;
+  subject_id: string;
+  subject_title: string | null;
+  title: string;
+  difficulty: string;
+  question_count: number;
+  topic: string | null;
+  created_at: string;
+  attempt_count: number;
+  best_percentage: number;
+  last_attempt_at: string | null;
+}
+
+export interface QuizDetail extends Omit<Quiz, "questions"> {
+  questions: QuizQuestion[];
+  attempt_count: number;
+  best_percentage: number;
+  last_attempt_at: string | null;
+}
+
+/** A scored attempt with the titles needed to render it without another call. */
+export interface QuizAttemptSummary {
+  id: string;
+  quiz_id: string;
+  subject_id: string;
+  quiz_title: string;
+  subject_title: string;
+  score: number;
+  total_questions: number;
+  percentage: number;
+  started_at: string | null;
+  completed_at: string;
+}
+
+/**
+ * The per-question snapshot stored with an attempt.
+ *
+ * `correct_answer` is exposed because an attempt row only exists after grading,
+ * so this is a record of completed work, not an answer key for a live quiz.
+ */
+export interface QuizAttemptAnswer {
+  id: string;
+  question_id: string;
+  question_text: string;
+  selected_answer: string;
+  correct_answer: string;
+  is_correct: boolean;
+  difficulty: string;
+  topic: string | null;
+  time_taken: number | null;
+}
+
+export interface QuizAttemptDetail extends QuizAttemptSummary {
+  answers: QuizAttemptAnswer[];
+}
+
 export interface DifficultyBreakdown {
   difficulty: string;
   attempted: number;
@@ -164,6 +264,64 @@ export interface SubjectPerformance {
   summary: PerformanceSummary;
   attempts: QuizAttempt[];
   mastery: TopicMastery[];
+}
+
+/**
+ * Lifetime totals for a student's learning.
+ *
+ * These describe the entire history regardless of how many rows exist or how
+ * many the overview's `limit` returned, so the headline numbers never shift just
+ * because a timeline page is shorter. `accuracy` and `average_percentage` are
+ * both 0-100.
+ */
+export interface LearningTotals {
+  subject_count: number;
+  quiz_count: number;
+  attempt_count: number;
+  questions_answered: number;
+  questions_correct: number;
+  questions_incorrect: number;
+  accuracy: number;
+  average_percentage: number;
+  best_percentage: number;
+  first_activity_at: string | null;
+  last_activity_at: string | null;
+}
+
+/** One row of the progress timeline: a single completed attempt. */
+export interface LearningTimelineEntry {
+  id: string;
+  quiz_id: string;
+  quiz_title: string;
+  subject_id: string;
+  subject_title: string;
+  score: number;
+  total_questions: number;
+  percentage: number;
+  completed_at: string;
+}
+
+export interface SubjectActivity {
+  subject_id: string;
+  subject_title: string;
+  attempt_count: number;
+  average_percentage: number;
+  best_percentage: number;
+  last_attempt_at: string | null;
+}
+
+/**
+ * Dashboard-level learning history.
+ *
+ * The three lists are each capped by the request's `limit`; `totals` always
+ * describes everything. `weakest_topics` reuses the same mastery rows the
+ * per-subject analytics already return, rather than a second progress model.
+ */
+export interface AnalyticsOverview {
+  totals: LearningTotals;
+  timeline: LearningTimelineEntry[];
+  subjects: SubjectActivity[];
+  weakest_topics: TopicMastery[];
 }
 
 export type WeakReasonCode =
@@ -454,6 +612,19 @@ class ApiClient {
     });
   }
 
+  /**
+   * Partially updates a subject.
+   *
+   * Only the keys present in `payload` are sent, so renaming a subject leaves
+   * its description and colour alone.
+   */
+  async updateSubject(id: string, payload: SubjectUpdate): Promise<Subject> {
+    return this.request<Subject>(`/subjects/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
   async deleteSubject(id: string): Promise<void> {
     return this.request<void>(`/subjects/${id}`, {
       method: "DELETE",
@@ -478,6 +649,28 @@ class ApiClient {
 
   async getDocument(documentId: string): Promise<Document> {
     return this.request<Document>(`/documents/${documentId}`);
+  }
+
+  /**
+   * Reads one document's processing state.
+   *
+   * The cheap target for a poll loop: it is the smallest response that can tell
+   * a caller the document finished, failed, or is still working.
+   */
+  async getDocumentStatus(documentId: string): Promise<DocumentStatus> {
+    return this.request<DocumentStatus>(`/documents/${documentId}/status`);
+  }
+
+  /**
+   * Re-runs extraction and embedding for an existing document.
+   *
+   * Reuses the same document row, so a retry never leaves a duplicate behind.
+   * Rejects with the API's 409 when a run is already in flight.
+   */
+  async reprocessDocument(documentId: string): Promise<DocumentStatus> {
+    return this.request<DocumentStatus>(`/documents/${documentId}/reprocess`, {
+      method: "POST",
+    });
   }
 
   async deleteDocument(documentId: string): Promise<void> {
@@ -530,9 +723,67 @@ class ApiClient {
     });
   }
 
+  /**
+   * Fetches one owned quiz with its questions and attempt aggregates.
+   *
+   * A soft-deleted quiz, or one belonging to somebody else, is a 404.
+   */
+  async getQuiz(quizId: string): Promise<QuizDetail> {
+    return this.request<QuizDetail>(`/quizzes/${quizId}`);
+  }
+
+  /**
+   * Lists owned quizzes, newest first.
+   *
+   * The response is a bounded page: `total` and `has_more` describe the whole
+   * collection so callers paginate from them rather than from `items.length`.
+   */
+  async getQuizzes(options: { subjectId?: string; limit?: number; offset?: number } = {}): Promise<Page<QuizSummary>> {
+    const params = new URLSearchParams();
+    if (options.subjectId) params.set("subject_id", options.subjectId);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    const query = params.toString();
+    return this.request<Page<QuizSummary>>(`/quizzes${query ? `?${query}` : ""}`);
+  }
+
+  /** Lists owned quiz attempts, most recent first. Survives quiz deletion. */
+  async getQuizAttempts(
+    options: { subjectId?: string; limit?: number; offset?: number } = {},
+  ): Promise<Page<QuizAttemptSummary>> {
+    const params = new URLSearchParams();
+    if (options.subjectId) params.set("subject_id", options.subjectId);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
+    const query = params.toString();
+    return this.request<Page<QuizAttemptSummary>>(`/quizzes/attempts${query ? `?${query}` : ""}`);
+  }
+
+  /** Fetches one owned attempt with every answer it recorded. */
+  async getQuizAttempt(attemptId: string): Promise<QuizAttemptDetail> {
+    return this.request<QuizAttemptDetail>(`/quizzes/attempts/${attemptId}`);
+  }
+
   // Analytics / Student Intelligence Endpoints
   async getSubjectPerformance(subjectId: string): Promise<SubjectPerformance> {
     return this.request<SubjectPerformance>(`/analytics/subjects/${subjectId}/performance`);
+  }
+
+  /**
+   * Fetches cross-subject learning history: totals, a recent timeline, per
+   * subject activity, and the weakest topics.
+   *
+   * `totals` always describes the whole history; `limit` caps the three lists.
+   * Pass `subjectId` to scope the entire response to one subject.
+   */
+  async getAnalyticsOverview(
+    options: { subjectId?: string; limit?: number } = {},
+  ): Promise<AnalyticsOverview> {
+    const params = new URLSearchParams();
+    if (options.subjectId) params.set("subject_id", options.subjectId);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    const query = params.toString();
+    return this.request<AnalyticsOverview>(`/analytics/overview${query ? `?${query}` : ""}`);
   }
 
   async getSubjectMastery(subjectId: string): Promise<TopicMastery[]> {

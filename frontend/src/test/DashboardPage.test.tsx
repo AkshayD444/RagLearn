@@ -29,6 +29,16 @@ vi.mock("@/components/dashboard/DueTodaySection", () => ({
   DueTodaySection: () => <div>due-today-stub</div>,
 }));
 
+// Stubbed, but with the navigation callback re-exposed so the wiring from the
+// dashboard into the router is still covered here rather than only in isolation.
+vi.mock("@/components/history/HistorySection", () => ({
+  HistorySection: ({ onNavigateToSubject }: { onNavigateToSubject?: (id: string) => void }) => (
+    <button type="button" onClick={() => onNavigateToSubject?.("subject-from-history")}>
+      history-section-stub
+    </button>
+  ),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
 }));
@@ -187,6 +197,23 @@ describe("DashboardPage header and stats", () => {
 
     expect(screen.getByText("recommendations-stub")).toBeInTheDocument();
     expect(screen.getByText("study-plan-stub")).toBeInTheDocument();
+  });
+
+  it("mounts the learning history section", async () => {
+    mockAuth();
+
+    render(<DashboardPage />);
+
+    expect(await screen.findByText("history-section-stub")).toBeInTheDocument();
+  });
+
+  it("routes a subject chosen inside the history section", async () => {
+    mockAuth();
+
+    render(<DashboardPage />);
+    fireEvent.click(await screen.findByText("history-section-stub"));
+
+    expect(pushMock).toHaveBeenCalledWith("/subjects/subject-from-history");
   });
 });
 

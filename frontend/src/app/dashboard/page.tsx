@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
 import { api, Subject } from "@/lib/api";
 import { AuthModal } from "@/components/auth/AuthModal";
@@ -9,6 +10,7 @@ import { CreateSubjectModal } from "@/components/dashboard/CreateSubjectModal";
 import { RecommendedForYou } from "@/components/recommendations/RecommendedForYou";
 import { StudyPlanSection } from "@/components/study-plan/StudyPlanSection";
 import { DueTodaySection } from "@/components/dashboard/DueTodaySection";
+import { HistorySection } from "@/components/history/HistorySection";
 import { 
   BookOpen, 
   Plus, 
@@ -19,10 +21,12 @@ import {
   Layers, 
   GraduationCap,
   ListChecks,
-  CalendarClock
+  CalendarClock,
+  History
 } from "lucide-react";
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { user, token, initialize, logout, isLoading: authLoading } = useAuthStore();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -203,6 +207,19 @@ export default function DashboardPage() {
             </p>
           </div>
           <StudyPlanSection subjects={subjects} />
+        </section>
+
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <History className="h-5 w-5 text-sky-400" /> Your Learning History
+            </h2>
+            <p className="text-xs text-slate-400">
+              Everything you have already studied: lifetime totals, your recent activity timeline, and the full
+              quiz and attempt history.
+            </p>
+          </div>
+          <HistorySection onNavigateToSubject={(id) => router.push(`/subjects/${id}`)} />
         </section>
 
         {/* Subjects Header & List */}

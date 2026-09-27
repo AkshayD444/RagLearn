@@ -2,14 +2,37 @@
 
 import React from "react";
 import { Document } from "@/lib/api";
-import { FileText, Trash2, CheckCircle2, Clock, AlertTriangle, Layers } from "lucide-react";
+import {
+  FileText,
+  Trash2,
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  Layers,
+  RotateCcw,
+} from "lucide-react";
 
 interface DocumentListProps {
   documents: Document[];
   onDelete: (id: string) => void;
+  /**
+   * Re-runs processing for a failed document.
+   *
+   * Optional so the list stays read-only where retrying is not wired up; the
+   * button is only rendered when it is provided, so a caller can never offer a
+   * retry that does nothing.
+   */
+  onReprocess?: (id: string) => void;
+  /** Document id currently being retried, so only that row shows progress. */
+  reprocessingId?: string | null;
 }
 
-export function DocumentList({ documents, onDelete }: DocumentListProps) {
+export function DocumentList({
+  documents,
+  onDelete,
+  onReprocess,
+  reprocessingId = null,
+}: DocumentListProps) {
   if (documents.length === 0) {
     return (
       <div className="p-8 rounded-2xl border border-dashed border-slate-800 bg-slate-900/30 text-center space-y-2">
@@ -70,6 +93,23 @@ export function DocumentList({ documents, onDelete }: DocumentListProps) {
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-950/80 border border-rose-800/60 text-rose-400 text-xs font-semibold" title={doc.error_message || "Extraction failed"}>
                 <AlertTriangle className="h-3.5 w-3.5" /> Extraction Failed
               </span>
+            )}
+
+            {onReprocess && doc.status === "FAILED" && (
+              <button
+                onClick={() => onReprocess(doc.id)}
+                disabled={reprocessingId === doc.id}
+                title="Process this document again"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800 text-slate-200 text-xs font-semibold hover:bg-slate-700 disabled:opacity-50 transition-colors"
+              >
+                <RotateCcw className="h-3.5 w-3.5" /> Retry
+              </button>
+            )}
+
+            {doc.status === "FAILED" && doc.error_message && (
+              <p className="hidden sm:block text-[10px] text-rose-400/80 max-w-[16rem] truncate">
+                {doc.error_message}
+              </p>
             )}
 
             <button

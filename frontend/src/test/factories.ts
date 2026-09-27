@@ -1,18 +1,27 @@
 import type {
+  AnalyticsOverview,
   Document,
+  DocumentStatus,
   Flashcard,
   FlashcardDeck,
   FlashcardDeckSummary,
   FlashcardReviewSummary,
   FlashcardSchedule,
   FlashcardTopicProgress,
+  LearningTimelineEntry,
+  LearningTotals,
+  Page,
   Quiz,
+  QuizAttemptSummary,
   QuizQuestion,
   QuizResultResponse,
+  QuizSummary,
   Recommendation,
   StudyPlan,
   StudyPlanItem,
   Subject,
+  SubjectActivity,
+  TopicMastery,
 } from "@/lib/api";
 
 /**
@@ -323,6 +332,149 @@ export function makeFlashcardTopicProgress(
     mastery_level: "developing",
     flashcard_mastery_score: 40,
     due_count: 1,
+    ...overrides,
+  };
+}
+
+export function makeDocumentStatus(overrides: Partial<DocumentStatus> = {}): DocumentStatus {
+  return {
+    id: "33333333-3333-4333-8333-333333333333",
+    subject_id: "11111111-1111-4111-8111-111111111111",
+    status: "PROCESSING",
+    error_message: null,
+    chunk_count: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeQuizSummary(overrides: Partial<QuizSummary> = {}): QuizSummary {
+  return {
+    id: "99999999-9999-4999-8999-999999999999",
+    subject_id: "11111111-1111-4111-8111-111111111111",
+    subject_title: "Organic Chemistry",
+    title: "Organic Chemistry Quiz",
+    difficulty: "medium",
+    question_count: 5,
+    topic: null,
+    created_at: "2026-01-04T00:00:00Z",
+    attempt_count: 2,
+    best_percentage: 80,
+    last_attempt_at: "2026-01-05T09:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeQuizAttemptSummary(
+  overrides: Partial<QuizAttemptSummary> = {},
+): QuizAttemptSummary {
+  return {
+    id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    quiz_id: "99999999-9999-4999-8999-999999999999",
+    subject_id: "11111111-1111-4111-8111-111111111111",
+    quiz_title: "Organic Chemistry Quiz",
+    subject_title: "Organic Chemistry",
+    score: 4,
+    total_questions: 5,
+    percentage: 80,
+    started_at: "2026-01-05T08:55:00Z",
+    completed_at: "2026-01-05T09:00:00Z",
+    ...overrides,
+  };
+}
+
+/**
+ * Builds a bounded page the way the backend does, deriving `has_more` from the
+ * total so a test cannot accidentally assert a combination the API would never
+ * return.
+ */
+export function makePage<T>(
+  items: T[],
+  overrides: Partial<Page<T>> = {},
+): Page<T> {
+  const limit = overrides.limit ?? 20;
+  const offset = overrides.offset ?? 0;
+  return {
+    items,
+    total: overrides.total ?? items.length,
+    limit,
+    offset,
+    has_more: overrides.has_more ?? offset + items.length < (overrides.total ?? items.length),
+  };
+}
+
+export function makeLearningTotals(overrides: Partial<LearningTotals> = {}): LearningTotals {
+  return {
+    subject_count: 1,
+    quiz_count: 2,
+    attempt_count: 3,
+    questions_answered: 15,
+    questions_correct: 11,
+    questions_incorrect: 4,
+    accuracy: 73.3,
+    average_percentage: 70,
+    best_percentage: 80,
+    first_activity_at: "2026-01-04T09:00:00Z",
+    last_activity_at: "2026-01-05T09:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeLearningTimelineEntry(
+  overrides: Partial<LearningTimelineEntry> = {},
+): LearningTimelineEntry {
+  return {
+    id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    quiz_id: "99999999-9999-4999-8999-999999999999",
+    quiz_title: "Organic Chemistry Quiz",
+    subject_id: "11111111-1111-4111-8111-111111111111",
+    subject_title: "Organic Chemistry",
+    score: 4,
+    total_questions: 5,
+    percentage: 80,
+    completed_at: "2026-01-05T09:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeSubjectActivity(overrides: Partial<SubjectActivity> = {}): SubjectActivity {
+  return {
+    subject_id: "11111111-1111-4111-8111-111111111111",
+    subject_title: "Organic Chemistry",
+    attempt_count: 3,
+    average_percentage: 70,
+    best_percentage: 80,
+    last_attempt_at: "2026-01-05T09:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeTopicMastery(overrides: Partial<TopicMastery> = {}): TopicMastery {
+  return {
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    subject_id: "11111111-1111-4111-8111-111111111111",
+    topic: "Nucleophilic substitution",
+    attempts: 2,
+    questions_attempted: 6,
+    questions_correct: 3,
+    questions_incorrect: 3,
+    accuracy: 50,
+    mastery_score: 45,
+    mastery_level: "developing",
+    last_attempt_at: "2026-01-05T09:00:00Z",
+    updated_at: "2026-01-05T09:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeAnalyticsOverview(
+  overrides: Partial<AnalyticsOverview> = {},
+): AnalyticsOverview {
+  return {
+    totals: makeLearningTotals(),
+    timeline: [makeLearningTimelineEntry()],
+    subjects: [makeSubjectActivity()],
+    weakest_topics: [makeTopicMastery()],
     ...overrides,
   };
 }
