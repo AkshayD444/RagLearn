@@ -264,6 +264,17 @@ export interface StudyPlanGenerateOptions {
   max_topics_per_session?: number | null;
 }
 
+export interface FlashcardSchedule {
+  ease_factor: number;
+  interval_days: number;
+  repetitions: number;
+  lapses: number;
+  /** `null` means the card has never been studied, which counts as due now. */
+  due_at: string | null;
+  last_reviewed_at: string | null;
+  is_new: boolean;
+}
+
 export interface Flashcard {
   id: string;
   front_text: string;
@@ -278,6 +289,17 @@ export interface Flashcard {
   source_snippet?: string | null;
   review_count: number;
   correct_count: number;
+  schedule: FlashcardSchedule;
+  /**
+   * Deck and subject identity, echoed on every card.
+   *
+   * A card seen outside its deck response would otherwise be unaddressable: the
+   * review endpoint takes a deck id plus one result per card, and a
+   * cross-subject due queue has to be grouped by deck client-side.
+   */
+  deck_id: string;
+  deck_title: string;
+  subject_id: string;
 }
 
 export interface FlashcardDeck {
@@ -286,6 +308,7 @@ export interface FlashcardDeck {
   title: string;
   topic?: string | null;
   card_count: number;
+  due_count: number;
   created_at: string;
   cards: Flashcard[];
 }
@@ -296,6 +319,7 @@ export interface FlashcardDeckSummary {
   title: string;
   topic?: string | null;
   card_count: number;
+  due_count: number;
   created_at: string;
   reviewed_card_count: number;
   correct_count: number;
@@ -310,6 +334,7 @@ export interface FlashcardReviewItem {
 export interface FlashcardReviewOutcome extends FlashcardReviewItem {
   review_count: number;
   correct_count: number;
+  schedule: FlashcardSchedule;
 }
 
 export interface FlashcardReviewSummary {
@@ -320,6 +345,26 @@ export interface FlashcardReviewSummary {
   incorrect_count: number;
   percentage: number;
   results: FlashcardReviewOutcome[];
+  due_count: number;
+  new_count: number;
+}
+
+/**
+ * One page of the review queue.
+ *
+ * `due_count` is the size of the whole queue, so it can exceed `cards.length`
+ * when the page is deliberately shorter. `new_count` is how much of that is
+ * never-studied material.
+ */
+export interface FlashcardDueResponse {
+  cards: Flashcard[];
+  due_count: number;
+  new_count: number;
+}
+
+export interface FlashcardRescheduleResponse {
+  card_id: string;
+  schedule: FlashcardSchedule;
 }
 
 export interface FlashcardTopicProgress {
@@ -329,8 +374,12 @@ export interface FlashcardTopicProgress {
   reviewed_count: number;
   correct_count: number;
   accuracy: number;
+  /** Quiz-derived mastery. Never written by a card review. */
   mastery_score?: number | null;
   mastery_level?: string | null;
+  /** Flashcard-derived mastery, tracked in its own evidence channel. */
+  flashcard_mastery_score?: number | null;
+  due_count: number;
 }
 
 class ApiClient {
@@ -574,6 +623,42 @@ class ApiClient {
   async getFlashcardProgress(subjectId: string): Promise<FlashcardTopicProgress[]> {
     return this.request<FlashcardTopicProgress[]>(
       `/flashcards/subjects/${subjectId}/progress`,
+    );
+  }
+
+  /**
+   * Fetches the review queue, most overdue first.
+   *
+   * `limit` is applied to the page, not the count: `due_count` on the response
+   * always reflects the full queue, so "12 due" can be shown while 20 are
+   * displayed. Every filter is optional, and an omitted filter means "all".
+   */
+  async getDueFlashcards(options: {
+    subjectId?: string;
+    deckId?: string;
+    limit?: number;
+  } = {}): Promise<FlashcardDueResponse> {
+    const params = new URLSearchParams();
+    if (options.subjectId) params.set("subject_id", options.subjectId);
+    if (options.deckId) params.set("deck_id", options.deckId);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    const query = params.toString();
+    return this.request<FlashcardDueResponse>(
+      `/flashcards/due${query ? `?${query}` : ""}`,
+    );
+  }
+
+  /**
+   * Returns one card to the due queue, discarding its schedule.
+   *
+   * The escape hatch for a card the student is genuinely stuck on: the next
+   * review starts from the initial state instead of being pushed a year out by
+   * a stretched interval. Review history is preserved server-side.
+   */
+  async rescheduleFlashcard(cardId: string): Promise<FlashcardRescheduleResponse> {
+    return this.request<FlashcardRescheduleResponse>(
+      `/flashcards/cards/${cardId}/reschedule`,
+      { method: "POST" },
     );
   }
 }

@@ -13,7 +13,22 @@ if TYPE_CHECKING:
 
 
 class TopicMastery(Base):
-    """Rolled-up per-user, per-subject, per-topic performance and mastery state."""
+    """Rolled-up per-user, per-subject, per-topic performance and mastery state.
+
+    Two evidence channels are tracked side by side and never mixed:
+
+    * the quiz channel (``questions_*``, ``accuracy``, ``mastery_score``,
+      ``mastery_level``) -- graded multiple-choice answers, consumed by the
+      weak-topic detector, the adaptive recommendation engine, and the study
+      planner;
+    * the flashcard channel (``flashcard_*``) -- self-graded reviews, consumed
+      by the flashcard progress panel.
+
+    They are separate columns rather than a shared counter because a card review
+    is self-assessed and far weaker evidence than a graded answer. Merging them
+    would inflate quiz-derived mastery and silently change every
+    recommendation the student sees.
+    """
 
     __tablename__ = "topic_mastery"
     __table_args__ = (
@@ -38,6 +53,13 @@ class TopicMastery(Base):
     mastery_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     mastery_level: Mapped[str] = mapped_column(String(20), nullable=False, default="novice")
     last_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Flashcard evidence channel. Written only by the flashcard review flow.
+    flashcard_reviews: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    flashcard_correct: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    flashcard_accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    flashcard_mastery: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, nullable=False
     )

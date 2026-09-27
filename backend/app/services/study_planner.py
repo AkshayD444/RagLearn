@@ -1,6 +1,6 @@
 import math
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Sequence
 
@@ -19,6 +19,7 @@ from app.services.adaptive_learning import (
     build_recommendations,
     load_metrics,
 )
+from app.services.flashcard_schedule import due_counts_by_topic
 
 DEFAULT_MAX_TOPICS_PER_SESSION = 3
 LEARN = "LEARN"
@@ -52,6 +53,12 @@ class StudyPlanItemDraft:
     questions_attempted: int
     questions_incorrect: int
     suggested_difficulty: str
+    # How many flashcards are already scheduled to be due for this topic.
+    # Defaults to 0 because `build_study_plan_draft` is pure and knows nothing
+    # about the flashcard schedule; `persist_study_plan` fills it in from the
+    # database. It never feeds `priority` -- that comes from the recommendation
+    # engine unchanged, so adding scheduling cannot re-rank an existing plan.
+    due_cards: int = 0
 
 
 @dataclass(frozen=True)
@@ -299,6 +306,27 @@ async def persist_study_plan(
         material_available=material_available,
     )
 
+    # The draft is built from quiz evidence alone, so the due-card counts are
+    # layered on afterwards. That keeps `build_study_plan_draft` pure and leaves
+    # the existing plan ordering and priorities untouched.
+    due_by_topic = await due_counts_by_topic(
+        db, user_id=user.id, subject_id=subject.id, now=created_at
+    )
+    if due_by_topic:
+        draft = replace(
+            draft,
+            sessions=tuple(
+                replace(
+                    session,
+                    items=tuple(
+                        replace(item, due_cards=due_by_topic.get(item.topic, 0))
+                        for item in session.items
+                    ),
+                )
+                for session in draft.sessions
+            ),
+        )
+
     plan = StudyPlan(
         user_id=user.id,
         subject_id=subject.id,
@@ -336,6 +364,7 @@ async def persist_study_plan(
                     questions_attempted=item.questions_attempted,
                     questions_incorrect=item.questions_incorrect,
                     suggested_difficulty=item.suggested_difficulty,
+                    due_cards=item.due_cards,
                 )
             )
 

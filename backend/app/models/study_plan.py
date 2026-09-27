@@ -94,6 +94,10 @@ class StudyPlanItem(Base):
     questions_attempted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     questions_incorrect: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     suggested_difficulty: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+    # Flashcards already scheduled to come due for this topic at plan time.
+    # Informational: it does not feed the priority score, which the planner
+    # inherits unchanged from the recommendation engine.
+    due_cards: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     session: Mapped["StudyPlanSession"] = relationship(
         "StudyPlanSession", back_populates="items"

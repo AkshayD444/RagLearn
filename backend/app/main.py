@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,14 +14,29 @@ from app.api.v1.recommendations import router as recommendations_router
 from app.api.v1.study_plans import router as study_plans_router
 from app.api.v1.flashcards import router as flashcards_router
 from app.core.config import settings
-from app.core.database import engine, Base
+from app.core.database import engine
+from app.core.logging_config import configure_logging, get_logger
+from app.core.middleware import RequestContextMiddleware
+from app.core.schema import ensure_schema
+
+logger = get_logger("app.startup")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Configured before anything can log, so a schema or connection failure below
+    # is itself observable.
+    configure_logging()
+    logger.info(
+        "application_starting",
+        extra={"environment": settings.ENVIRONMENT, "log_json": settings.LOG_JSON},
+    )
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        # Alembic owns the schema. This reconciles rather than creates, and
+        # never alters or drops: see app/core/schema.py for the three cases.
+        await conn.run_sync(ensure_schema)
     yield
+    logger.info("application_stopping")
 
 
 app = FastAPI(
@@ -28,7 +44,7 @@ app = FastAPI(
     openapi_url="/api/v1/openapi.json",
     docs_url="/api/v1/docs",
     redoc_url="/api/v1/redoc",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # CORS Configuration
@@ -39,7 +55,13 @@ if settings.BACKEND_CORS_ORIGINS:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Lets a browser surface our correlation id in its own error console.
+        expose_headers=["X-Request-ID"],
     )
+
+# Added after CORS so it is the outermost layer: every response, including one
+# rejected by CORS, carries an X-Request-ID.
+app.add_middleware(RequestContextMiddleware)
 
 # Include API v1 Routers
 app.include_router(health_router, prefix="/api/v1")
@@ -59,5 +81,5 @@ async def root():
     return {
         "message": f"Welcome to {settings.PROJECT_NAME}",
         "docs_url": "/api/v1/docs",
-        "health_check": "/api/v1/health"
+        "health_check": "/api/v1/health",
     }

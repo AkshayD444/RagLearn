@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeSubject } from "./factories";
 
+const pushMock = vi.fn();
+
 vi.mock("@/lib/api", () => ({
   api: {
     getSubjects: vi.fn(),
@@ -21,6 +23,14 @@ vi.mock("@/components/recommendations/RecommendedForYou", () => ({
 
 vi.mock("@/components/study-plan/StudyPlanSection", () => ({
   StudyPlanSection: () => <div>study-plan-stub</div>,
+}));
+
+vi.mock("@/components/dashboard/DueTodaySection", () => ({
+  DueTodaySection: () => <div>due-today-stub</div>,
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
 }));
 
 vi.mock("@/components/auth/AuthModal", () => ({
@@ -66,6 +76,7 @@ function mockAuth(overrides: Partial<AuthState> = {}) {
 }
 
 beforeEach(() => {
+  pushMock.mockReset();
   getSubjects.mockReset();
   createSubject.mockReset();
   deleteSubject.mockReset();
@@ -218,5 +229,54 @@ describe("DashboardPage error handling", () => {
 
     expect(await screen.findByText("No Subjects Added Yet")).toBeInTheDocument();
     expect(screen.getByText("Enrolled Subjects")).toBeInTheDocument();
+  });
+});
+
+describe("DashboardPage subject navigation", () => {
+  const subject = makeSubject();
+
+  it("renders the due today section alongside the rest of the dashboard", async () => {
+    mockAuth();
+    getSubjects.mockResolvedValue([subject]);
+
+    render(<DashboardPage />);
+
+    expect(await screen.findByText("due-today-stub")).toBeInTheDocument();
+  });
+
+  it("opens the subject module from the card's own action", async () => {
+    mockAuth();
+    getSubjects.mockResolvedValue([subject]);
+
+    render(<DashboardPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /Open Module/ }));
+
+    expect(pushMock).toHaveBeenCalledWith(`/subjects/${subject.id}`);
+  });
+
+  it("opens the module when the card body is clicked, not just the action", async () => {
+    mockAuth();
+    getSubjects.mockResolvedValue([subject]);
+
+    render(<DashboardPage />);
+    fireEvent.click(await screen.findByText(subject.title));
+
+    expect(pushMock).toHaveBeenCalledWith(`/subjects/${subject.id}`);
+  });
+
+  it("deletes without navigating away from the dashboard", async () => {
+    mockAuth();
+    getSubjects.mockResolvedValue([subject]);
+    deleteSubject.mockResolvedValue(undefined as any);
+    const confirmSpy = vi
+      .spyOn(window, "confirm")
+      .mockReturnValue(true as unknown as boolean);
+
+    render(<DashboardPage />);
+    fireEvent.click(await screen.findByTitle("Delete Subject"));
+
+    await waitFor(() => expect(deleteSubject).toHaveBeenCalledWith(subject.id));
+    expect(pushMock).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 });

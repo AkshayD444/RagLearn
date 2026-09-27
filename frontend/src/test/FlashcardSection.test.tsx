@@ -5,6 +5,7 @@ import {
   makeFlashcardDeck,
   makeFlashcardDeckSummary,
   makeFlashcardReviewSummary,
+  makeFlashcardSchedule,
   makeFlashcardTopicProgress,
 } from "./factories";
 
@@ -181,8 +182,8 @@ describe("FlashcardSection review flow", () => {
         incorrect_count: 1,
         percentage: 50,
         results: [
-          { card_id: "55555555-5555-4555-8555-555555555555", is_correct: true, response: null, review_count: 1, correct_count: 1 },
-          { card_id: "88888888-8888-4888-8888-888888888888", is_correct: false, response: null, review_count: 1, correct_count: 0 },
+          { card_id: "55555555-5555-4555-8555-555555555555", is_correct: true, response: null, review_count: 1, correct_count: 1, schedule: makeFlashcardSchedule() },
+          { card_id: "88888888-8888-4888-8888-888888888888", is_correct: false, response: null, review_count: 1, correct_count: 0, schedule: makeFlashcardSchedule() },
         ],
       }),
     );
@@ -213,8 +214,8 @@ describe("FlashcardSection review flow", () => {
         incorrect_count: 1,
         percentage: 50,
         results: [
-          { card_id: "55555555-5555-4555-8555-555555555555", is_correct: true, response: null, review_count: 1, correct_count: 1 },
-          { card_id: "88888888-8888-4888-8888-888888888888", is_correct: false, response: null, review_count: 1, correct_count: 0 },
+          { card_id: "55555555-5555-4555-8555-555555555555", is_correct: true, response: null, review_count: 1, correct_count: 1, schedule: makeFlashcardSchedule() },
+          { card_id: "88888888-8888-4888-8888-888888888888", is_correct: false, response: null, review_count: 1, correct_count: 0, schedule: makeFlashcardSchedule() },
         ],
       }),
     );
@@ -245,7 +246,7 @@ describe("FlashcardSection review flow", () => {
         incorrect_count: 0,
         percentage: 100,
         results: [
-          { card_id: "55555555-5555-4555-8555-555555555555", is_correct: true, response: null, review_count: 1, correct_count: 1 },
+          { card_id: "55555555-5555-4555-8555-555555555555", is_correct: true, response: null, review_count: 1, correct_count: 1, schedule: makeFlashcardSchedule() },
         ],
       }),
     );

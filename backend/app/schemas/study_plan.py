@@ -67,6 +67,10 @@ class StudyPlanItemRead(BaseModel):
     questions_attempted: int
     questions_incorrect: int
     suggested_difficulty: str
+    # Flashcards already scheduled to be due for this topic when the plan was
+    # built. Informational only: it does not affect `priority`, which comes
+    # from the recommendation engine unchanged.
+    due_cards: int = 0
 
 
 class StudyPlanSessionRead(BaseModel):

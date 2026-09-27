@@ -76,6 +76,42 @@ describe("useAuthStore.initialize", () => {
     expect(useAuthStore.getState().token).toBeNull();
     expect(useAuthStore.getState().isLoading).toBe(false);
   });
+
+  it("settles out of the loading state even when no token is stored", async () => {
+    // A caller that awaits initialize() needs "settled" to mean the same thing
+    // whether or not a token existed, so this cannot depend on the initial
+    // state being correct.
+    useAuthStore.setState({ isLoading: true, token: "stale-in-memory" });
+
+    await useAuthStore.getState().initialize();
+
+    expect(useAuthStore.getState().isLoading).toBe(false);
+    expect(useAuthStore.getState().token).toBeNull();
+    expect(useAuthStore.getState().user).toBeNull();
+  });
+
+  it("keeps a session that was established while the lookup was in flight", async () => {
+    window.localStorage.setItem("access_token", "stale-token");
+    // The student signs in with a different account before /me settles, so the
+    // stored token has moved on by the time the stale request fails.
+    let rejectLookup: (err: Error) => void = () => {};
+    getMe.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectLookup = reject;
+        }),
+    );
+
+    const initializing = useAuthStore.getState().initialize();
+    window.localStorage.setItem("access_token", "fresh-token");
+    useAuthStore.setState({ token: "fresh-token", user });
+    rejectLookup(new Error("Not authenticated"));
+    await initializing;
+
+    expect(window.localStorage.getItem("access_token")).toBe("fresh-token");
+    expect(useAuthStore.getState().token).toBe("fresh-token");
+    expect(useAuthStore.getState().user).toEqual(user);
+  });
 });
 
 describe("useAuthStore.login", () => {

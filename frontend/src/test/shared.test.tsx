@@ -7,6 +7,12 @@ import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import { Spinner } from "@/components/shared/Spinner";
 import { makeSubject } from "./factories";
 
+const pushMock = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
+
 describe("Spinner", () => {
   it("is hidden from assistive technology and uses the default size", () => {
     const { container } = render(<Spinner />);
@@ -104,12 +110,24 @@ describe("SubjectCard", () => {
     expect(onSelect).toHaveBeenCalledWith(subject);
   });
 
-  it("is a no-op when Open Module is clicked without an onSelect handler", () => {
-    render(<SubjectCard subject={makeSubject()} onDelete={vi.fn()} />);
+  it("navigates to the subject module when no onSelect handler is given", () => {
+    const subject = makeSubject({ id: "subject-1" });
+    render(<SubjectCard subject={subject} onDelete={vi.fn()} />);
 
-    expect(() =>
-      fireEvent.click(screen.getByRole("button", { name: /Open Module/ })),
-    ).not.toThrow();
+    fireEvent.click(screen.getByRole("button", { name: /Open Module/ }));
+
+    // The action is never dead: without an override it still goes somewhere.
+    expect(pushMock).toHaveBeenCalledWith("/subjects/subject-1");
+  });
+
+  it("prefers onSelect over the router when both are available", () => {
+    const onSelect = vi.fn();
+    render(<SubjectCard subject={makeSubject()} onDelete={vi.fn()} onSelect={onSelect} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Open Module/ }));
+
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
   it("applies the subject colour to the accent bar", () => {

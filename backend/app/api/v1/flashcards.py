@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import Integer, and_, cast, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.api.deps import get_current_user, get_db, require_owned_subject
 from app.models.flashcard import Flashcard, FlashcardDeck, FlashcardReview
@@ -13,17 +14,31 @@ from app.models.user import User
 from app.schemas.flashcard import (
     FlashcardDeckRead,
     FlashcardDeckSummary,
+    FlashcardDueResponse,
     FlashcardGenerateRequest,
     FlashcardRead,
+    FlashcardRescheduleResponse,
     FlashcardReviewItem,
     FlashcardReviewOutcome,
     FlashcardReviewRequest,
     FlashcardReviewSummaryResponse,
+    FlashcardScheduleRead,
     FlashcardTopicProgress,
 )
 from app.services.flashcard_engine import flashcard_generation_service
+from app.services.flashcard_schedule import (
+    apply_review_schedule,
+    card_review_totals,
+    count_due_cards,
+    deck_due_counts,
+    due_counts_by_topic,
+    load_due_cards,
+    lock_cards_for_review,
+    reset_card_schedule,
+)
 from app.services.quiz_engine import NoStudyMaterialsError
-from app.services.student_intelligence import normalize_topic
+from app.services.spaced_repetition import is_new
+from app.services.student_intelligence import apply_flashcard_counters, normalize_topic
 
 router = APIRouter(prefix="/flashcards", tags=["Flashcards"])
 
@@ -44,6 +59,10 @@ def _correct_sum() -> Any:
 async def _load_cards(db: AsyncSession, deck_id: uuid.UUID) -> List[Flashcard]:
     result = await db.execute(
         select(Flashcard)
+        # The deck is joined rather than lazily loaded: `FlashcardRead` echoes
+        # deck and subject identity, and a lazy load here would raise
+        # MissingGreenlet under the async session.
+        .options(joinedload(Flashcard.deck))
         .where(Flashcard.deck_id == deck_id)
         .order_by(Flashcard.position, Flashcard.created_at, Flashcard.id)
     )
@@ -87,24 +106,9 @@ async def _card_review_totals(
     db: AsyncSession, *, current_user: User, card_ids: List[uuid.UUID]
 ) -> CardTotals:
     """Per-card ``(review_count, correct_count)`` derived from the review log."""
-    if not card_ids:
-        return {}
-    result = await db.execute(
-        select(
-            FlashcardReview.card_id,
-            func.count(FlashcardReview.id),
-            _correct_sum(),
-        )
-        .where(
-            FlashcardReview.user_id == current_user.id,
-            FlashcardReview.card_id.in_(card_ids),
-        )
-        .group_by(FlashcardReview.card_id)
+    return await card_review_totals(
+        db, user_id=current_user.id, card_ids=card_ids
     )
-    return {
-        row[0]: (int(row[1]), int(row[2]))
-        for row in result.all()
-    }
 
 
 async def _deck_review_totals(
@@ -131,6 +135,18 @@ async def _deck_review_totals(
     }
 
 
+def _to_schedule_read(card: Flashcard) -> FlashcardScheduleRead:
+    return FlashcardScheduleRead(
+        ease_factor=card.ease_factor,
+        interval_days=card.interval_days,
+        repetitions=card.repetitions,
+        lapses=card.lapses,
+        due_at=card.due_at,
+        last_reviewed_at=card.last_reviewed_at,
+        is_new=is_new(card.due_at),
+    )
+
+
 def _to_card_read(card: Flashcard, totals: Optional[Tuple[int, int]]) -> FlashcardRead:
     review_count, correct_count = totals or (0, 0)
     return FlashcardRead(
@@ -147,11 +163,15 @@ def _to_card_read(card: Flashcard, totals: Optional[Tuple[int, int]]) -> Flashca
         source_snippet=card.source_snippet,
         review_count=review_count,
         correct_count=correct_count,
+        schedule=_to_schedule_read(card),
+        deck_id=card.deck_id,
+        deck_title=card.deck.title,
+        subject_id=card.deck.subject_id,
     )
 
 
 def _to_deck_read(
-    deck: FlashcardDeck, cards: List[Flashcard], totals: CardTotals
+    deck: FlashcardDeck, cards: List[Flashcard], totals: CardTotals, due_count: int
 ) -> FlashcardDeckRead:
     return FlashcardDeckRead(
         id=deck.id,
@@ -159,6 +179,7 @@ def _to_deck_read(
         title=deck.title,
         topic=deck.topic,
         card_count=deck.card_count,
+        due_count=due_count,
         created_at=deck.created_at,
         cards=[_to_card_read(card, totals.get(card.id)) for card in cards],
     )
@@ -193,7 +214,104 @@ async def generate_flashcards(
     totals = await _card_review_totals(
         db, current_user=current_user, card_ids=[card.id for card in cards]
     )
-    return _to_deck_read(deck, cards, totals)
+    # A freshly generated deck has only new cards due, which is the whole deck.
+    due_count, _new_count = await count_due_cards(
+        db, user_id=current_user.id, now=datetime.utcnow(), deck_id=deck.id
+    )
+    return _to_deck_read(deck, cards, totals, due_count)
+
+
+@router.get("/due", response_model=FlashcardDueResponse)
+async def get_due_flashcards(
+    subject_id: Optional[uuid.UUID] = Query(default=None),
+    deck_id: Optional[uuid.UUID] = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """The cards due for review right now, most overdue first.
+
+    A card is due when it has never been studied or its interval has elapsed.
+    ``due_count`` counts the whole queue for the given filters, so it can be
+    larger than ``limit``; ``new_count`` is the never-studied portion.
+
+    Declared before the ``/decks/{deck_id}`` routes purely for readability --
+    the paths do not collide, since a static segment cannot be captured by a
+    path parameter in a sibling route.
+    """
+    if subject_id is not None:
+        await require_owned_subject(db, subject_id, current_user)
+    if deck_id is not None:
+        await _load_owned_deck(db, deck_id, current_user)
+
+    now = datetime.utcnow()
+    cards = await load_due_cards(
+        db,
+        user_id=current_user.id,
+        now=now,
+        subject_id=subject_id,
+        deck_id=deck_id,
+        limit=limit,
+    )
+    due_count, new_count = await count_due_cards(
+        db,
+        user_id=current_user.id,
+        now=now,
+        subject_id=subject_id,
+        deck_id=deck_id,
+    )
+    totals = await _card_review_totals(
+        db, current_user=current_user, card_ids=[card.id for card in cards]
+    )
+    return FlashcardDueResponse(
+        cards=[_to_card_read(card, totals.get(card.id)) for card in cards],
+        due_count=due_count,
+        new_count=new_count,
+    )
+
+
+@router.post(
+    "/cards/{card_id}/reschedule", response_model=FlashcardRescheduleResponse
+)
+async def reschedule_flashcard(
+    card_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """Puts one card back into the due queue, discarding its schedule.
+
+    The escape hatch for a card that is genuinely still unfamiliar: the student
+    is stuck on it and no amount of waiting will help. This clears the interval,
+    the ease, and the lapse count, so the next review starts from the initial
+    state instead of being pushed a year out by a stretched interval.
+
+    Review history is left alone -- forgetting a card is not the same as
+    pretending the reviews never happened.
+    """
+    result = await db.execute(
+        select(Flashcard)
+        .join(FlashcardDeck, FlashcardDeck.id == Flashcard.deck_id)
+        .where(
+            Flashcard.id == card_id,
+            FlashcardDeck.user_id == current_user.id,
+            FlashcardDeck.deleted_at.is_(None),
+        )
+    )
+    card = result.scalar_one_or_none()
+    if not card:
+        # Same 404 as any other missing card: a foreign card id must be
+        # indistinguishable from one that does not exist.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Flashcard not found or access denied.",
+        )
+
+    reset_card_schedule(card)
+    await db.commit()
+    await db.refresh(card)
+    return FlashcardRescheduleResponse(
+        card_id=card.id, schedule=_to_schedule_read(card)
+    )
 
 
 @router.get("/decks", response_model=List[FlashcardDeckSummary])
@@ -225,6 +343,13 @@ async def list_flashcard_decks(
     totals = await _deck_review_totals(
         db, current_user=current_user, deck_ids=[deck.id for deck in decks]
     )
+    now = datetime.utcnow()
+    due_by_deck = await deck_due_counts(
+        db,
+        user_id=current_user.id,
+        deck_ids=[deck.id for deck in decks],
+        now=now,
+    )
 
     summaries = []
     for deck in decks:
@@ -236,6 +361,7 @@ async def list_flashcard_decks(
                 title=deck.title,
                 topic=deck.topic,
                 card_count=deck.card_count,
+                due_count=due_by_deck.get(deck.id, 0),
                 created_at=deck.created_at,
                 reviewed_card_count=reviewed_card_count,
                 correct_count=correct_count,
@@ -256,7 +382,10 @@ async def get_flashcard_deck(
     totals = await _card_review_totals(
         db, current_user=current_user, card_ids=[card.id for card in cards]
     )
-    return _to_deck_read(deck, cards, totals)
+    due_count, _new_count = await count_due_cards(
+        db, user_id=current_user.id, now=datetime.utcnow(), deck_id=deck.id
+    )
+    return _to_deck_read(deck, cards, totals, due_count)
 
 
 @router.delete("/decks/{deck_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
@@ -304,12 +433,18 @@ async def review_flashcard_deck(
     """Records a self-graded review of every card in an owned deck.
 
     Reviews are append-only, so re-reviewing a deck adds history rather than
-    replacing it. ``topic_mastery`` is deliberately not touched here: quiz
-    evidence remains the only input to the Phase 6/7 mastery and recommendation
-    models.
+    replacing it. Two things are written alongside each review:
+
+    * the card's SM-2 schedule, advanced in place under a row lock so two
+      concurrent reviews cannot both read the same state and lose an increment;
+    * the ``flashcard_*`` evidence channel on ``topic_mastery``. The quiz channel
+      is left untouched, so self-graded reviews cannot re-rank the weak-topic
+      and recommendation models.
     """
     deck = await _load_owned_deck(db, deck_id, current_user)
-    cards = await _load_cards(db, deck.id)
+    # Locked read: the scheduler is a read-modify-write over the card's own
+    # state, so the rows have to stay pinned until the transaction commits.
+    cards = await lock_cards_for_review(db, deck_id=deck.id)
     if not cards:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -321,6 +456,10 @@ async def review_flashcard_deck(
     submitted = {review.card_id: review for review in payload.reviews}
     reviewed_at = datetime.utcnow()
 
+    # Accumulate per topic first, then apply one atomic counter update per topic
+    # instead of per review: a 20-card deck over 4 topics is 4 statements rather
+    # than 20, and the quiz channel is still not involved.
+    topic_deltas: Dict[str, Tuple[int, int]] = {}
     for card in cards:
         review = submitted[card.id]
         db.add(
@@ -334,11 +473,32 @@ async def review_flashcard_deck(
                 reviewed_at=reviewed_at,
             )
         )
+        apply_review_schedule(card, is_correct=review.is_correct, reviewed_at=reviewed_at)
+
+        topic = normalize_topic(card.topic)
+        reviewed_delta, correct_delta = topic_deltas.get(topic, (0, 0))
+        topic_deltas[topic] = (
+            reviewed_delta + 1,
+            correct_delta + (1 if review.is_correct else 0),
+        )
+
+    for topic, (reviewed_delta, correct_delta) in topic_deltas.items():
+        await apply_flashcard_counters(
+            db,
+            user_id=current_user.id,
+            subject_id=deck.subject_id,
+            topic=topic,
+            reviewed_delta=reviewed_delta,
+            correct_delta=correct_delta,
+        )
 
     await db.commit()
 
     totals = await _card_review_totals(
         db, current_user=current_user, card_ids=[card.id for card in cards]
+    )
+    due_count, new_count = await count_due_cards(
+        db, user_id=current_user.id, now=datetime.utcnow(), deck_id=deck.id
     )
 
     results = []
@@ -355,6 +515,7 @@ async def review_flashcard_deck(
                 response=review.response,
                 review_count=review_count,
                 correct_count=card_correct_count,
+                schedule=_to_schedule_read(card),
             )
         )
 
@@ -370,6 +531,8 @@ async def review_flashcard_deck(
         incorrect_count=reviewed_count - correct_count,
         percentage=percentage,
         results=results,
+        due_count=due_count,
+        new_count=new_count,
     )
 
 
@@ -384,7 +547,9 @@ async def get_flashcard_progress(
 ) -> Any:
     """Per-topic flashcard progress for a subject, annotated with topic mastery.
 
-    The mastery columns are read from ``topic_mastery`` and never written here.
+    Two mastery figures are reported side by side and never mixed: the quiz
+    channel (``mastery_score``/``mastery_level``) and the flashcard channel
+    (``flashcard_mastery_score``). This endpoint writes neither.
     """
     await require_owned_subject(db, subject_id, current_user)
 
@@ -394,6 +559,7 @@ async def get_flashcard_progress(
     if not deck_ids:
         return []
 
+    now = datetime.utcnow()
     result = await db.execute(
         select(
             Flashcard.topic,
@@ -424,18 +590,31 @@ async def get_flashcard_progress(
     ]
 
     mastery_result = await db.execute(
-        select(TopicMastery.topic, TopicMastery.mastery_score, TopicMastery.mastery_level).where(
+        select(
+            TopicMastery.topic,
+            TopicMastery.mastery_score,
+            TopicMastery.mastery_level,
+            TopicMastery.flashcard_mastery,
+        ).where(
             TopicMastery.user_id == current_user.id,
             TopicMastery.subject_id == subject_id,
         )
     )
     mastery_by_topic = {
-        row[0]: (row[1], row[2]) for row in mastery_result.all()
+        row[0]: (row[1], row[2], row[3]) for row in mastery_result.all()
     }
+
+    due_by_topic = await due_counts_by_topic(
+        db, user_id=current_user.id, subject_id=subject_id, now=now
+    )
 
     progress = []
     for row in rows:
-        mastery_score, mastery_level = mastery_by_topic.get(row["topic"], (None, None))
+        (
+            mastery_score,
+            mastery_level,
+            flashcard_mastery,
+        ) = mastery_by_topic.get(row["topic"], (None, None, None))
         reviewed_count = row["reviewed_count"]
         progress.append(
             FlashcardTopicProgress(
@@ -451,6 +630,8 @@ async def get_flashcard_progress(
                 ),
                 mastery_score=mastery_score,
                 mastery_level=mastery_level,
+                flashcard_mastery_score=flashcard_mastery,
+                due_count=due_by_topic.get(row["topic"], 0),
             )
         )
 

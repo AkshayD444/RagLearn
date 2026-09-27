@@ -1,19 +1,31 @@
 "use client";
 
 import React from "react";
+import { useRouter } from "next/navigation";
 import { Subject } from "@/lib/api";
 import { BookOpen, Trash2, ChevronRight, FileText } from "lucide-react";
 
 interface SubjectCardProps {
   subject: Subject;
   onDelete: (id: string) => void;
+  /** Overrides the default navigation, mainly to keep tests off the router. */
   onSelect?: (subject: Subject) => void;
 }
 
 export function SubjectCard({ subject, onDelete, onSelect }: SubjectCardProps) {
+  const router = useRouter();
+
+  // Navigation lives here rather than at each call site so "Open Module" cannot
+  // render as a dead action in a usage that forgot to pass a handler.
+  const open = () => {
+    if (onSelect) onSelect(subject);
+    else router.push(`/subjects/${subject.id}`);
+  };
+
   return (
     <div 
-      className="group relative rounded-2xl border border-slate-800 bg-slate-900/60 p-6 backdrop-blur-sm transition-all duration-300 hover:border-slate-700 hover:bg-slate-800/60 hover:shadow-xl hover:shadow-sky-950/20 flex flex-col justify-between"
+      onClick={open}
+      className="group relative rounded-2xl border border-slate-800 bg-slate-900/60 p-6 backdrop-blur-sm transition-all duration-300 hover:border-slate-700 hover:bg-slate-800/60 hover:shadow-xl hover:shadow-sky-950/20 flex flex-col justify-between cursor-pointer"
     >
       <div 
         className="absolute top-0 left-6 right-6 h-1 rounded-b-md transition-all group-hover:h-1.5"
@@ -61,7 +73,10 @@ export function SubjectCard({ subject, onDelete, onSelect }: SubjectCardProps) {
         </div>
 
         <button
-          onClick={() => onSelect && onSelect(subject)}
+          onClick={(e) => {
+            e.stopPropagation();
+            open();
+          }}
           className="inline-flex items-center gap-1 text-xs font-semibold text-sky-400 group-hover:text-sky-300 transition-all group-hover:translate-x-1"
         >
           Open Module <ChevronRight className="h-3.5 w-3.5" />

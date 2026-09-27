@@ -8,6 +8,7 @@ import { SubjectCard } from "@/components/dashboard/SubjectCard";
 import { CreateSubjectModal } from "@/components/dashboard/CreateSubjectModal";
 import { RecommendedForYou } from "@/components/recommendations/RecommendedForYou";
 import { StudyPlanSection } from "@/components/study-plan/StudyPlanSection";
+import { DueTodaySection } from "@/components/dashboard/DueTodaySection";
 import { 
   BookOpen, 
   Plus, 
@@ -17,7 +18,8 @@ import {
   BarChart3, 
   Layers, 
   GraduationCap,
-  ListChecks
+  ListChecks,
+  CalendarClock
 } from "lucide-react";
 
 export default function DashboardPage() {
@@ -167,6 +169,18 @@ export default function DashboardPage() {
         </div>
 
         {/* Recommended for You */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <CalendarClock className="h-5 w-5 text-amber-400" /> Due Today
+            </h2>
+            <p className="text-xs text-slate-400">
+              Cards the scheduler has brought back for you, most overdue first. Streak and interval are tracked per card.
+            </p>
+          </div>
+          <DueTodaySection />
+        </section>
+
         <section className="space-y-4">
           <div>
             <h2 className="text-xl font-bold text-white flex items-center gap-2">

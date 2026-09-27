@@ -1,7 +1,7 @@
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +11,10 @@ from app.models.attempt import QuizAttempt, QuizAttemptAnswer
 from app.models.mastery import TopicMastery
 from app.models.quiz import Quiz
 from app.models.user import User
+from app.services.spaced_repetition import (
+    compute_flashcard_accuracy,
+    compute_flashcard_mastery,
+)
 
 EVIDENCE_TARGET = 10
 UNTAGGED_TOPIC = "General"
@@ -175,36 +179,24 @@ async def _create_mastery_row(
         pass
 
 
-async def _apply_mastery_counters(
+async def _upsert_mastery(
     db: AsyncSession,
     *,
     user_id: uuid.UUID,
     subject_id: uuid.UUID,
     topic: str,
-    attempted_delta: int = 0,
-    correct_delta: int = 0,
-    incorrect_delta: int = 0,
-    attempts_delta: int = 0,
+    increment: Callable[[], Any],
 ) -> TopicMastery:
-    """Atomically adds the deltas to a topic's counters and returns the row.
+    """Applies an arbitrary delta statement to a topic's row, creating it if needed.
 
     The UPDATE always runs first and is a harmless no-op when the row is not
     there yet. Only when the follow-up read proves the row genuinely does not
     exist is it created and the deltas re-applied, which closes both the
     lost-update race and the concurrent-create race.
+
+    The caller supplies the statement so the quiz channel and the flashcard
+    channel can share this lifecycle without sharing a counter.
     """
-
-    def increment() -> Any:
-        return _counter_increment(
-            user_id=user_id,
-            subject_id=subject_id,
-            topic=topic,
-            attempted_delta=attempted_delta,
-            correct_delta=correct_delta,
-            incorrect_delta=incorrect_delta,
-            attempts_delta=attempts_delta,
-        )
-
     await db.execute(increment())
     mastery = await _select_mastery(
         db, user_id=user_id, subject_id=subject_id, topic=topic
@@ -228,6 +220,39 @@ async def _apply_mastery_counters(
     return mastery
 
 
+async def _apply_mastery_counters(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    subject_id: uuid.UUID,
+    topic: str,
+    attempted_delta: int = 0,
+    correct_delta: int = 0,
+    incorrect_delta: int = 0,
+    attempts_delta: int = 0,
+) -> TopicMastery:
+    """Atomically adds the deltas to a topic's quiz counters and returns the row."""
+
+    def increment() -> Any:
+        return _counter_increment(
+            user_id=user_id,
+            subject_id=subject_id,
+            topic=topic,
+            attempted_delta=attempted_delta,
+            correct_delta=correct_delta,
+            incorrect_delta=incorrect_delta,
+            attempts_delta=attempts_delta,
+        )
+
+    return await _upsert_mastery(
+        db,
+        user_id=user_id,
+        subject_id=subject_id,
+        topic=topic,
+        increment=increment,
+    )
+
+
 async def _refresh_mastery(mastery: TopicMastery, last_attempt_at: datetime) -> None:
     """Recomputes the derived mastery fields from the stored counters.
 
@@ -244,6 +269,77 @@ async def _refresh_mastery(mastery: TopicMastery, last_attempt_at: datetime) -> 
     mastery.mastery_level = mastery_level(mastery.mastery_score)
     mastery.last_attempt_at = last_attempt_at
     mastery.updated_at = datetime.utcnow()
+
+
+def _flashcard_counter_increment(
+    *,
+    user_id: uuid.UUID,
+    subject_id: uuid.UUID,
+    topic: str,
+    reviewed_delta: int,
+    correct_delta: int,
+) -> Any:
+    """Builds a single-statement UPDATE for the flashcard evidence channel.
+
+    Mirrors :func:`_counter_increment` for the same reason: the counters are
+    incremented as column expressions in the database so two concurrent reviews
+    of the same topic cannot lose an increment.
+    """
+    return (
+        update(TopicMastery)
+        .where(
+            TopicMastery.user_id == user_id,
+            TopicMastery.subject_id == subject_id,
+            TopicMastery.topic == topic,
+        )
+        .values(
+            flashcard_reviews=TopicMastery.flashcard_reviews + reviewed_delta,
+            flashcard_correct=TopicMastery.flashcard_correct + correct_delta,
+        )
+    )
+
+
+async def apply_flashcard_counters(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    subject_id: uuid.UUID,
+    topic: str,
+    reviewed_delta: int = 0,
+    correct_delta: int = 0,
+) -> TopicMastery:
+    """Records self-graded flashcard reviews against a topic.
+
+    Writes only the ``flashcard_*`` columns. The quiz channel -- and therefore
+    every weak-topic rule, recommendation, and study-plan priority -- is left
+    exactly as it was, so flashcard practice informs the flashcard progress
+    panel without silently re-ranking a student's whole study plan.
+    """
+
+    def increment() -> Any:
+        return _flashcard_counter_increment(
+            user_id=user_id,
+            subject_id=subject_id,
+            topic=topic,
+            reviewed_delta=reviewed_delta,
+            correct_delta=correct_delta,
+        )
+
+    mastery = await _upsert_mastery(
+        db,
+        user_id=user_id,
+        subject_id=subject_id,
+        topic=topic,
+        increment=increment,
+    )
+    mastery.flashcard_accuracy = compute_flashcard_accuracy(
+        mastery.flashcard_correct, mastery.flashcard_reviews
+    )
+    mastery.flashcard_mastery = compute_flashcard_mastery(
+        mastery.flashcard_correct, mastery.flashcard_reviews
+    )
+    mastery.updated_at = datetime.utcnow()
+    return mastery
 
 
 async def persist_attempt(

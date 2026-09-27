@@ -4,6 +4,7 @@ import type {
   FlashcardDeck,
   FlashcardDeckSummary,
   FlashcardReviewSummary,
+  FlashcardSchedule,
   FlashcardTopicProgress,
   Quiz,
   QuizQuestion,
@@ -205,6 +206,19 @@ export function makeQuizResult(
   };
 }
 
+export function makeFlashcardSchedule(overrides: Partial<FlashcardSchedule> = {}): FlashcardSchedule {
+  return {
+    ease_factor: 2.5,
+    interval_days: 1,
+    repetitions: 1,
+    lapses: 0,
+    due_at: "2026-01-03T00:00:00Z",
+    last_reviewed_at: "2026-01-02T00:00:00Z",
+    is_new: false,
+    ...overrides,
+  };
+}
+
 export function makeFlashcard(overrides: Partial<Flashcard> = {}): Flashcard {
   return {
     id: "55555555-5555-4555-8555-555555555555",
@@ -220,6 +234,10 @@ export function makeFlashcard(overrides: Partial<Flashcard> = {}): Flashcard {
     source_snippet: "Vector databases store high-dimensional embeddings.",
     review_count: 0,
     correct_count: 0,
+    schedule: makeFlashcardSchedule(),
+    deck_id: "77777777-7777-4777-8777-777777777777",
+    deck_title: "Flashcards: Vector Databases",
+    subject_id: "11111111-1111-4111-8111-111111111111",
     ...overrides,
   };
 }
@@ -231,6 +249,7 @@ export function makeFlashcardDeck(overrides: Partial<FlashcardDeck> = {}): Flash
     title: "Flashcards: Vector Databases",
     topic: "Vector Databases",
     card_count: 2,
+    due_count: 1,
     created_at: "2026-01-02T00:00:00Z",
     cards: [
       makeFlashcard({ position: 0 }),
@@ -256,6 +275,7 @@ export function makeFlashcardDeckSummary(
     title: "Flashcards: Vector Databases",
     topic: "Vector Databases",
     card_count: 2,
+    due_count: 1,
     created_at: "2026-01-02T00:00:00Z",
     reviewed_card_count: 1,
     correct_count: 1,
@@ -280,8 +300,11 @@ export function makeFlashcardReviewSummary(
         response: null,
         review_count: 1,
         correct_count: 1,
+        schedule: makeFlashcardSchedule({ interval_days: 6, repetitions: 2 }),
       },
     ],
+    due_count: 0,
+    new_count: 0,
     ...overrides,
   };
 }
@@ -298,6 +321,8 @@ export function makeFlashcardTopicProgress(
     accuracy: 50,
     mastery_score: 62.5,
     mastery_level: "developing",
+    flashcard_mastery_score: 40,
+    due_count: 1,
     ...overrides,
   };
 }

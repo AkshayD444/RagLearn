@@ -21,15 +21,28 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   initialize: async () => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    if (!token) return;
+    if (!token) {
+      // Explicit, rather than relying on the initial value: initialize() is
+      // also called after a sign-in attempt, and a caller that awaits it needs
+      // "settled" to mean the same thing whether or not a token existed.
+      set({ user: null, token: null, isLoading: false });
+      return;
+    }
 
     set({ isLoading: true, token });
     try {
       const user = await api.getMe();
       set({ user, isLoading: false });
     } catch (err: any) {
-      if (typeof window !== 'undefined') localStorage.removeItem('access_token');
-      set({ user: null, token: null, isLoading: false });
+      // Only discard the token this call was made with. If the student signed in
+      // while /me was in flight, the stored token has moved on and clearing it
+      // would log them straight back out.
+      const current =
+        typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+      if (current === token) {
+        if (typeof window !== 'undefined') localStorage.removeItem('access_token');
+        set({ user: null, token: null, isLoading: false });
+      }
     }
   },
 

@@ -45,6 +45,7 @@ def _item_to_read(item: StudyPlanItem) -> StudyPlanItemRead:
         questions_attempted=item.questions_attempted,
         questions_incorrect=item.questions_incorrect,
         suggested_difficulty=item.suggested_difficulty,
+        due_cards=item.due_cards,
     )
 
 
