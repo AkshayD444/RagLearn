@@ -8,6 +8,7 @@ import { DocumentUploader } from "@/components/documents/DocumentUploader";
 import { DocumentList } from "@/components/documents/DocumentList";
 import { RagTutor } from "@/components/rag/RagTutor";
 import { QuizSection } from "@/components/quiz/QuizSection";
+import { FlashcardSection } from "@/components/flashcards/FlashcardSection";
 import { StudentIntelligence } from "@/components/analytics/StudentIntelligence";
 import { 
   ArrowLeft, 
@@ -176,6 +177,13 @@ export default function SubjectDetailPage() {
               >
                 <Sparkles className="h-4 w-4" /> Generate Quiz
               </button>
+              <button
+                disabled={readyDocs === 0}
+                onClick={() => scrollToSection("flashcards")}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                <Layers className="h-4 w-4" /> Build Flashcards
+              </button>
             </div>
           </div>
         </div>
@@ -267,6 +275,24 @@ export default function SubjectDetailPage() {
             hasReadyDocuments={readyDocs > 0}
             initialTopic={recommendedTopic ?? undefined}
             onAttemptComplete={() => setPerformanceRefreshKey((k) => k + 1)}
+          />
+        </section>
+
+        {/* Flashcards Section */}
+        <section id="flashcards" className="space-y-6 scroll-mt-20">
+          <div>
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <Layers className="h-5 w-5 text-cyan-400" /> Flashcards
+            </h2>
+            <p className="text-xs text-slate-400">
+              Generate a deck of question-and-answer cards from this subject&apos;s materials, then self-grade each card
+              to track your progress. Every card keeps a citation back to the source it came from.
+            </p>
+          </div>
+          <FlashcardSection
+            subjectId={subjectId}
+            hasReadyDocuments={readyDocs > 0}
+            initialTopic={recommendedTopic ?? undefined}
           />
         </section>
 

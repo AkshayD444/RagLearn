@@ -264,6 +264,75 @@ export interface StudyPlanGenerateOptions {
   max_topics_per_session?: number | null;
 }
 
+export interface Flashcard {
+  id: string;
+  front_text: string;
+  back_text: string;
+  hint?: string | null;
+  topic?: string | null;
+  position: number;
+  source_document_id?: string | null;
+  source_document_title?: string | null;
+  source_chunk_id?: string | null;
+  source_page_number?: number | null;
+  source_snippet?: string | null;
+  review_count: number;
+  correct_count: number;
+}
+
+export interface FlashcardDeck {
+  id: string;
+  subject_id: string;
+  title: string;
+  topic?: string | null;
+  card_count: number;
+  created_at: string;
+  cards: Flashcard[];
+}
+
+export interface FlashcardDeckSummary {
+  id: string;
+  subject_id: string;
+  title: string;
+  topic?: string | null;
+  card_count: number;
+  created_at: string;
+  reviewed_card_count: number;
+  correct_count: number;
+}
+
+export interface FlashcardReviewItem {
+  card_id: string;
+  is_correct: boolean;
+  response?: string | null;
+}
+
+export interface FlashcardReviewOutcome extends FlashcardReviewItem {
+  review_count: number;
+  correct_count: number;
+}
+
+export interface FlashcardReviewSummary {
+  deck_id: string;
+  title: string;
+  reviewed_count: number;
+  correct_count: number;
+  incorrect_count: number;
+  percentage: number;
+  results: FlashcardReviewOutcome[];
+}
+
+export interface FlashcardTopicProgress {
+  subject_id: string;
+  topic: string;
+  card_count: number;
+  reviewed_count: number;
+  correct_count: number;
+  accuracy: number;
+  mastery_score?: number | null;
+  mastery_level?: string | null;
+}
+
 class ApiClient {
   private getToken(): string | null {
     if (typeof window === "undefined") return null;
@@ -460,6 +529,52 @@ class ApiClient {
       method: "PATCH",
       body: JSON.stringify({ completed }),
     });
+  }
+
+  // Flashcard Endpoints
+  async generateFlashcards(
+    subjectId: string,
+    cardCount = 10,
+    topic?: string | null,
+  ): Promise<FlashcardDeck> {
+    return this.request<FlashcardDeck>("/flashcards/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        subject_id: subjectId,
+        card_count: cardCount,
+        topic: topic || null,
+      }),
+    });
+  }
+
+  async getFlashcardDecks(subjectId: string): Promise<FlashcardDeckSummary[]> {
+    return this.request<FlashcardDeckSummary[]>(`/flashcards/decks?subject_id=${subjectId}`);
+  }
+
+  async getFlashcardDeck(deckId: string): Promise<FlashcardDeck> {
+    return this.request<FlashcardDeck>(`/flashcards/decks/${deckId}`);
+  }
+
+  async deleteFlashcardDeck(deckId: string): Promise<void> {
+    return this.request<void>(`/flashcards/decks/${deckId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async reviewFlashcardDeck(
+    deckId: string,
+    reviews: FlashcardReviewItem[],
+  ): Promise<FlashcardReviewSummary> {
+    return this.request<FlashcardReviewSummary>(`/flashcards/decks/${deckId}/review`, {
+      method: "POST",
+      body: JSON.stringify({ reviews }),
+    });
+  }
+
+  async getFlashcardProgress(subjectId: string): Promise<FlashcardTopicProgress[]> {
+    return this.request<FlashcardTopicProgress[]>(
+      `/flashcards/subjects/${subjectId}/progress`,
+    );
   }
 }
 

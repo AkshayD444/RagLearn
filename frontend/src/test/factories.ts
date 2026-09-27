@@ -1,5 +1,10 @@
 import type {
   Document,
+  Flashcard,
+  FlashcardDeck,
+  FlashcardDeckSummary,
+  FlashcardReviewSummary,
+  FlashcardTopicProgress,
   Quiz,
   QuizQuestion,
   QuizResultResponse,
@@ -196,6 +201,103 @@ export function makeQuizResult(
         source_snippet: null,
       },
     ],
+    ...overrides,
+  };
+}
+
+export function makeFlashcard(overrides: Partial<Flashcard> = {}): Flashcard {
+  return {
+    id: "55555555-5555-4555-8555-555555555555",
+    front_text: "What does a vector database index?",
+    back_text: "High-dimensional embeddings, so similarity search stays fast.",
+    hint: "Think about embeddings.",
+    topic: "Vector Databases",
+    position: 0,
+    source_document_id: "33333333-3333-4333-8333-333333333333",
+    source_document_title: "lecture-01.pdf",
+    source_chunk_id: "66666666-6666-4666-8666-666666666666",
+    source_page_number: 3,
+    source_snippet: "Vector databases store high-dimensional embeddings.",
+    review_count: 0,
+    correct_count: 0,
+    ...overrides,
+  };
+}
+
+export function makeFlashcardDeck(overrides: Partial<FlashcardDeck> = {}): FlashcardDeck {
+  return {
+    id: "77777777-7777-4777-8777-777777777777",
+    subject_id: "11111111-1111-4111-8111-111111111111",
+    title: "Flashcards: Vector Databases",
+    topic: "Vector Databases",
+    card_count: 2,
+    created_at: "2026-01-02T00:00:00Z",
+    cards: [
+      makeFlashcard({ position: 0 }),
+      makeFlashcard({
+        id: "88888888-8888-4888-8888-888888888888",
+        position: 1,
+        front_text: "What is retrieval augmented generation?",
+        back_text: "Grounding a model's answer in retrieved source documents.",
+        review_count: 2,
+        correct_count: 1,
+      }),
+    ],
+    ...overrides,
+  };
+}
+
+export function makeFlashcardDeckSummary(
+  overrides: Partial<FlashcardDeckSummary> = {},
+): FlashcardDeckSummary {
+  return {
+    id: "77777777-7777-4777-8777-777777777777",
+    subject_id: "11111111-1111-4111-8111-111111111111",
+    title: "Flashcards: Vector Databases",
+    topic: "Vector Databases",
+    card_count: 2,
+    created_at: "2026-01-02T00:00:00Z",
+    reviewed_card_count: 1,
+    correct_count: 1,
+    ...overrides,
+  };
+}
+
+export function makeFlashcardReviewSummary(
+  overrides: Partial<FlashcardReviewSummary> = {},
+): FlashcardReviewSummary {
+  return {
+    deck_id: "77777777-7777-4777-8777-777777777777",
+    title: "Flashcards: Vector Databases",
+    reviewed_count: 1,
+    correct_count: 1,
+    incorrect_count: 0,
+    percentage: 100,
+    results: [
+      {
+        card_id: "55555555-5555-4555-8555-555555555555",
+        is_correct: true,
+        response: null,
+        review_count: 1,
+        correct_count: 1,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+export function makeFlashcardTopicProgress(
+  overrides: Partial<FlashcardTopicProgress> = {},
+): FlashcardTopicProgress {
+  return {
+    subject_id: "11111111-1111-4111-8111-111111111111",
+    topic: "Vector Databases",
+    card_count: 2,
+    reviewed_count: 2,
+    correct_count: 1,
+    accuracy: 50,
+    mastery_score: 62.5,
+    mastery_level: "developing",
     ...overrides,
   };
 }

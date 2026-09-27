@@ -6,6 +6,7 @@ from app.models.quiz import Quiz, QuizQuestion
 from app.models.attempt import QuizAttempt, QuizAttemptAnswer
 from app.models.mastery import TopicMastery
 from app.models.study_plan import StudyPlan, StudyPlanItem, StudyPlanSession
+from app.models.flashcard import FlashcardDeck, Flashcard, FlashcardReview
 
 __all__ = [
     "User",
@@ -20,4 +21,7 @@ __all__ = [
     "StudyPlan",
     "StudyPlanSession",
     "StudyPlanItem",
+    "FlashcardDeck",
+    "Flashcard",
+    "FlashcardReview",
 ]

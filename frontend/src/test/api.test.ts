@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/api";
+import {
+  makeFlashcardDeck,
+  makeFlashcardDeckSummary,
+  makeFlashcardReviewSummary,
+  makeFlashcardTopicProgress,
+} from "@/test/factories";
 
 /**
  * These tests exercise the real `ApiClient` against a stubbed `fetch`, so they
@@ -307,6 +313,101 @@ describe("api student intelligence endpoints", () => {
 
     expect(lastCall()[0]).toBe(
       `${BASE}/analytics/subjects/subject-1/weak-topics?limit=5`,
+    );
+  });
+});
+
+describe("api flashcard endpoints", () => {
+  it("generates a deck for a subject", async () => {
+    const deck = makeFlashcardDeck();
+    fetchMock.mockResolvedValue(jsonResponse(deck));
+
+    const result = await api.generateFlashcards("subject-1", 6, "Vector Databases");
+
+    expect(result).toEqual(deck);
+    const [url, call] = lastCall();
+    expect(url).toBe(`${BASE}/flashcards/generate`);
+    expect(call.method).toBe("POST");
+    expect(JSON.parse(call.body as string)).toEqual({
+      subject_id: "subject-1",
+      card_count: 6,
+      topic: "Vector Databases",
+    });
+  });
+
+  it("normalizes a missing topic to null when generating", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(makeFlashcardDeck()));
+
+    await api.generateFlashcards("subject-1", 3);
+
+    expect(JSON.parse(lastCall()[1].body as string).topic).toBeNull();
+  });
+
+  it("lists decks for a subject", async () => {
+    const decks = [makeFlashcardDeckSummary()];
+    fetchMock.mockResolvedValue(jsonResponse(decks));
+
+    const result = await api.getFlashcardDecks("subject-1");
+
+    expect(result).toEqual(decks);
+    expect(lastCall()[0]).toBe(`${BASE}/flashcards/decks?subject_id=subject-1`);
+  });
+
+  it("fetches a single deck with its cards", async () => {
+    const deck = makeFlashcardDeck();
+    fetchMock.mockResolvedValue(jsonResponse(deck));
+
+    const result = await api.getFlashcardDeck("deck-1");
+
+    expect(result.cards).toHaveLength(2);
+    expect(result.cards[0].source_document_title).toBe("lecture-01.pdf");
+    expect(lastCall()[0]).toBe(`${BASE}/flashcards/decks/deck-1`);
+  });
+
+  it("deletes a deck and tolerates the 204 empty body", async () => {
+    fetchMock.mockResolvedValue(emptyResponse(204));
+
+    await expect(api.deleteFlashcardDeck("deck-1")).resolves.toEqual({});
+
+    const [url, call] = lastCall();
+    expect(url).toBe(`${BASE}/flashcards/decks/deck-1`);
+    expect(call.method).toBe("DELETE");
+  });
+
+  it("submits self-graded reviews for a deck", async () => {
+    const summary = makeFlashcardReviewSummary();
+    fetchMock.mockResolvedValue(jsonResponse(summary));
+
+    const result = await api.reviewFlashcardDeck("deck-1", [
+      { card_id: "card-1", is_correct: true, response: "  embeddings  " },
+    ]);
+
+    expect(result.percentage).toBe(100);
+    const [url, call] = lastCall();
+    expect(url).toBe(`${BASE}/flashcards/decks/deck-1/review`);
+    expect(call.method).toBe("POST");
+    expect(JSON.parse(call.body as string)).toEqual({
+      reviews: [{ card_id: "card-1", is_correct: true, response: "  embeddings  " }],
+    });
+  });
+
+  it("requests per-topic flashcard progress", async () => {
+    const progress = [makeFlashcardTopicProgress()];
+    fetchMock.mockResolvedValue(jsonResponse(progress));
+
+    const result = await api.getFlashcardProgress("subject-1");
+
+    expect(result[0].mastery_level).toBe("developing");
+    expect(lastCall()[0]).toBe(`${BASE}/flashcards/subjects/subject-1/progress`);
+  });
+
+  it("surfaces the backend detail message for a rejected generation", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ detail: "No processed documents found for this subject." }, 400),
+    );
+
+    await expect(api.generateFlashcards("subject-1", 5)).rejects.toThrow(
+      "No processed documents found for this subject.",
     );
   });
 });

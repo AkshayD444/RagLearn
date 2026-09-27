@@ -90,14 +90,16 @@ AI-Learning-Assistant/
 ├── backend/
 │   ├── app/
 │   │   ├── api/v1/          # REST API routers (auth, subjects, documents, rag,
-│   │   │                    #   quizzes, analytics, recommendations, study-plans, health)
+│   │   │                    #   quizzes, flashcards, analytics, recommendations,
+│   │   │                    #   study-plans, health)
 │   │   ├── core/            # Configuration & async SQLAlchemy database setup
-│   │   ├── models/          # ORM models (Users, Subjects, Documents, Chunks, Quizzes, etc.)
+│   │   ├── models/          # ORM models (Users, Subjects, Documents, Chunks, Quizzes,
+│   │   │                    #   Flashcards, Topic Mastery, etc.)
 │   │   ├── schemas/         # Pydantic request/response schemas
 │   │   ├── rag/             # Grounded RAG retrieval & Gemini SDK wrappers
-│   │   └── services/        # Business logic (Quiz Engine, Student Intelligence,
-│   │                        #   Weak Topic Detection, Adaptive Learning,
-│   │                        #   Study Planner)
+│   │   └── services/        # Business logic (Quiz Engine, Flashcard Engine,
+│   │                        #   Student Intelligence, Weak Topic Detection,
+│   │                        #   Adaptive Learning, Study Planner)
 │   ├── tests/               # Pytest suite (SQLite) + tests/integration (pgvector)
 │   ├── .env.example
 │   ├── app/main.py          # FastAPI entry point
@@ -106,7 +108,8 @@ AI-Learning-Assistant/
 └── frontend/
     ├── src/
     │   ├── app/             # Next.js App Router (Layouts & Pages)
-    │   ├── components/      # Feature components (auth, documents, rag, quiz, ...)
+    │   ├── components/      # Feature components (auth, documents, rag, quiz,
+    │   │                    #   flashcards, analytics, study-plan, ...)
     │   ├── lib/             # Typed API client and shared domain types
     │   ├── store/           # Zustand auth store
     │   └── test/            # Vitest unit tests and payload factories
