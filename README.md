@@ -99,7 +99,8 @@ AI-Learning-Assistant/
 │   │   ├── rag/             # Grounded RAG retrieval & Gemini SDK wrappers
 │   │   └── services/        # Business logic (Quiz Engine, Flashcard Engine,
 │   │                        #   Student Intelligence, Weak Topic Detection,
-│   │                        #   Adaptive Learning, Study Planner)
+│   │                        #   Adaptive Learning, Adaptive Mastery,
+│   │                        #   Next-Learning Intelligence, Study Planner)
 │   ├── tests/               # Pytest suite (SQLite) + tests/integration (pgvector)
 │   ├── .env.example
 │   ├── app/main.py          # FastAPI entry point

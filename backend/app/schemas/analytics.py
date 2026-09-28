@@ -77,6 +77,8 @@ class WeakTopicRead(BaseModel):
     questions_correct: int
     questions_incorrect: int
     reasons: List[WeakReasonRead] = Field(default_factory=list)
+    #: ``confirmed`` when an aggregate-count rule fired, ``low`` otherwise.
+    confidence: str = "low"
     last_attempt_at: Optional[datetime] = None
 
 

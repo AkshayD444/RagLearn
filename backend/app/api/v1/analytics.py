@@ -213,6 +213,7 @@ def _to_weak_topic_read(weak_topic: WeakTopic) -> WeakTopicRead:
             WeakReasonRead(code=reason.code, message=reason.message)
             for reason in weak_topic.reasons
         ],
+        confidence=weak_topic.confidence,
         last_attempt_at=weak_topic.last_attempt_at,
     )
 

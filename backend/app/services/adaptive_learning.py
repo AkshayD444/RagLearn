@@ -70,6 +70,21 @@ W_ERROR = 0.35
 W_RECENCY = 0.20
 ERROR_REPETITION_BOOST = 0.30
 
+# Extended priority formula (Phase 10). Kept under separate constants so the
+# Phase 6 weights above keep their exact behaviour for the existing
+# recommendations and study-plan endpoints; the extended score is a distinct,
+# deliberately re-weighted view used only by the next-learning engine.
+EXT_W_MASTERY = 0.30
+EXT_W_WEAKNESS = 0.20
+EXT_W_ERROR = 0.20
+EXT_W_RECENCY = 0.15
+EXT_W_DIFFICULTY = 0.15
+
+#: A topic made up entirely of medium-difficulty answers has a difficulty index
+#: of 1.0; this is the index corresponding to the hardest difficulty weight.
+DIFFICULTY_INDEX_MIN = 1.0
+DIFFICULTY_INDEX_MAX = 1.8
+
 # Recommendation type boundaries
 REVIEW_ACCURACY_THRESHOLD = 60.0
 MIN_MAINTAIN_ACCURACY = 80.0
@@ -107,6 +122,10 @@ class TopicMetrics:
     last_attempt_at: Optional[datetime]
     recent_attempted: int = 0
     recent_correct: int = 0
+    #: Flashcard evidence channel, carried for consumers (such as the future
+    #: next-learning engine) that blend both channels into one estimate.
+    flashcard_reviews: int = 0
+    flashcard_correct: int = 0
 
 
 @dataclass
@@ -200,6 +219,67 @@ def priority_score(metrics: TopicMetrics) -> float:
             days_since(metrics.last_attempt_at, datetime.utcnow()),
             recent_accuracy,
         )
+    )
+    return round(blended * evidence_gate(metrics.questions_attempted) * 100.0, 1)
+
+
+def difficulty_component(difficulty_index: float) -> float:
+    """How much a topic's answer difficulty raises urgency, normalized to 0-1.
+
+    A difficulty index of 1.0 (every answer medium) contributes nothing; the
+    hardest observed mix (``DIFFICULTY_INDEX_MAX``) saturates at 1.0.
+    """
+    span = DIFFICULTY_INDEX_MAX - DIFFICULTY_INDEX_MIN
+    return max(0.0, min(1.0, (difficulty_index - DIFFICULTY_INDEX_MIN) / span))
+
+
+def extended_priority_score(
+    metrics: TopicMetrics,
+    *,
+    difficulty_index: float = 1.0,
+    mastery_ratio: Optional[float] = None,
+) -> float:
+    """0-100 deterministic priority that folds mastery and difficulty in.
+
+    Intended for the next-learning engine, which already has a difficulty index
+    and a confidence-gated mastery estimate from :mod:`app.services.adaptive_mastery`.
+    When either is unknown, it substitutes a neutral value (index 1.0, stored
+    mastery) so the score stays well-defined without those inputs.
+
+        priority = evidence_gate * (
+            w_mastery   * (1 - mastery_ratio)
+          + w_weakness  * weakness
+          + w_error     * error
+          + w_recency   * recency
+          + w_difficulty* difficulty_component
+        ) * 100
+
+    The mastery term and the weakness term are deliberately both present:
+    mastery reflects confidence-gated ability, weakness reflects raw accuracy,
+    and together they keep both the thin-but-flawless learner and the
+    slip-heavy learner represented. The weights sum to 1.0 so the blended term
+    stays inside 0-1 before the evidence gate.
+    """
+    accuracy = metrics.questions_correct / max(1, metrics.questions_attempted)
+    recent_accuracy = (
+        metrics.recent_correct / metrics.recent_attempted
+        if metrics.recent_attempted
+        else None
+    )
+    resolved_mastery_ratio = (
+        mastery_ratio if mastery_ratio is not None else metrics.mastery_score / 100.0
+    )
+    blended = (
+        EXT_W_MASTERY * max(0.0, 1.0 - resolved_mastery_ratio)
+        + EXT_W_WEAKNESS * weakness_component(accuracy)
+        + EXT_W_ERROR * error_component(
+            metrics.questions_incorrect, metrics.questions_attempted
+        )
+        + EXT_W_RECENCY * recency_component(
+            days_since(metrics.last_attempt_at, datetime.utcnow()),
+            recent_accuracy,
+        )
+        + EXT_W_DIFFICULTY * difficulty_component(difficulty_index)
     )
     return round(blended * evidence_gate(metrics.questions_attempted) * 100.0, 1)
 
@@ -344,6 +424,8 @@ async def load_metrics(
             mastery_score=mastery.mastery_score,
             mastery_level=mastery.mastery_level,
             last_attempt_at=mastery.last_attempt_at,
+            flashcard_reviews=mastery.flashcard_reviews,
+            flashcard_correct=mastery.flashcard_correct,
         )
 
     if active_subject_ids:

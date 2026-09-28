@@ -168,6 +168,42 @@ async def due_counts_by_topic(
     return dict(counts)
 
 
+async def due_counts_by_subject_topic(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    subject_ids: Sequence[uuid.UUID],
+    now: datetime,
+) -> Dict[Tuple[uuid.UUID, str], int]:
+    """Due-card count per ``(subject_id, topic)`` for the next-learning engine.
+
+    The cross-subject next-learning recommendation needs one answer per subject
+    rather than one aggregate, so this returns a two-keyed map instead of the
+    single-subject :func:`due_counts_by_topic`. Topics are normalized the same
+    way (``None``/blank becomes "General"), and only non-deleted decks owned by
+    ``user_id`` with due cards are counted.
+    """
+    if not subject_ids:
+        return {}
+    result = await db.execute(
+        select(FlashcardDeck.subject_id, Flashcard.topic, func.count(Flashcard.id))
+        .select_from(Flashcard)
+        .join(FlashcardDeck, FlashcardDeck.id == Flashcard.deck_id)
+        .where(
+            FlashcardDeck.user_id == user_id,
+            FlashcardDeck.deleted_at.is_(None),
+            FlashcardDeck.subject_id.in_(list(subject_ids)),
+            due_condition(now),
+        )
+        .group_by(FlashcardDeck.subject_id, Flashcard.topic)
+    )
+
+    counts: Dict[Tuple[uuid.UUID, str], int] = defaultdict(int)
+    for subject_id, topic, count in result.all():
+        counts[(subject_id, normalize_topic(topic))] += int(count)
+    return dict(counts)
+
+
 async def deck_due_counts(
     db: AsyncSession,
     *,
