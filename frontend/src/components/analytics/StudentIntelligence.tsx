@@ -43,12 +43,14 @@ function masteryBarColor(level: string): string {
 const REASON_LABELS: Record<string, string> = {
   repeated_mistakes: "Repeated mistakes",
   low_accuracy: "Low accuracy",
+  recent_poor_performance: "Recent decline",
   insufficient_evidence: "Needs more evidence",
 };
 
 const REASON_STYLES: Record<string, string> = {
   repeated_mistakes: "bg-rose-950/80 border-rose-800/60 text-rose-400",
   low_accuracy: "bg-amber-950/80 border-amber-800/60 text-amber-400",
+  recent_poor_performance: "bg-orange-950/80 border-orange-800/60 text-orange-400",
   insufficient_evidence: "bg-slate-900/80 border-slate-700/60 text-slate-400",
 };
 
@@ -301,10 +303,23 @@ export function StudentIntelligence({ subjectId, refreshKey = 0 }: StudentIntell
 }
 
 function WeakTopicRow({ item }: { item: WeakTopic }) {
+  const confirmed = item.confidence === "confirmed";
   return (
     <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-bold text-white capitalize truncate">{item.topic}</p>
+        <div className="flex items-center gap-2 min-w-0">
+          <p className="text-xs font-bold text-white capitalize truncate">{item.topic}</p>
+          <span
+            title={confirmed ? "Confirmed by multiple attempts" : "Based on limited evidence"}
+            className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full border text-[10px] font-semibold ${
+              confirmed
+                ? "bg-emerald-950/80 border-emerald-800/60 text-emerald-400"
+                : "bg-slate-900/80 border-slate-700/60 text-slate-400"
+            }`}
+          >
+            {confirmed ? "Confirmed" : "Low confidence"}
+          </span>
+        </div>
         <span className="shrink-0 text-[11px] text-slate-400">
           {item.questions_correct}/{item.questions_attempted} • {item.accuracy}% accuracy
         </span>

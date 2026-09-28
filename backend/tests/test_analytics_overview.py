@@ -14,8 +14,12 @@ import pytest
 from sqlalchemy import event
 
 from app.models.attempt import QuizAttempt
+from app.models.document import Document
+from app.models.document_chunk import DocumentChunk
+from app.models.flashcard import Flashcard, FlashcardDeck
 from app.models.mastery import TopicMastery
 from app.models.quiz import Quiz
+from app.rag.embeddings import embedding_service
 from tests.conftest import TestAsyncSessionLocal, test_engine
 
 
@@ -76,6 +80,29 @@ async def _seed_mastery(
                 questions_incorrect=4 - int(4 * mastery_score),
             )
         )
+        await session.commit()
+
+
+async def _seed_due_flashcards(user_id: str, subject_id: str, count: int = 2) -> None:
+    """Seeds a deck of never-studied cards, which are all due immediately."""
+    async with TestAsyncSessionLocal() as session:
+        deck = FlashcardDeck(
+            user_id=uuid.UUID(user_id),
+            subject_id=uuid.UUID(subject_id),
+            title="Overview Deck",
+            card_count=count,
+        )
+        session.add(deck)
+        await session.flush()
+        for i in range(count):
+            session.add(
+                Flashcard(
+                    deck_id=deck.id,
+                    front_text=f"Front {i}",
+                    back_text=f"Back {i}",
+                    position=i,
+                )
+            )
         await session.commit()
 
 
@@ -172,6 +199,11 @@ async def test_overview_is_empty_for_a_new_student(client, registered_user):
         "accuracy": 0.0,
         "average_percentage": 0.0,
         "best_percentage": 0.0,
+        "document_count": 0,
+        "ready_document_count": 0,
+        "chunk_count": 0,
+        "due_flashcard_count": 0,
+        "average_topic_mastery": 0.0,
         "first_activity_at": None,
         "last_activity_at": None,
     }
@@ -304,6 +336,8 @@ async def test_overview_scopes_to_one_subject(client, registered_user, subject):
     assert [entry["quiz_title"] for entry in body["timeline"]] == ["Physics"]
     assert [s["subject_title"] for s in body["subjects"]] == ["Retrieval Strategies"]
     assert [t["topic"] for t in body["weakest_topics"]] == ["Momentum"]
+    # The mastery average pools only the scoped subject's topics.
+    assert body["totals"]["average_topic_mastery"] == 0.3
 
 
 @pytest.mark.asyncio
@@ -427,3 +461,142 @@ async def test_performance_totals_match_the_existing_breakdown(
     assert summary["total_incorrect"] == 6
     assert summary["accuracy"] == 25.0
     assert summary["best_percentage"] == 50.0
+
+
+@pytest.mark.asyncio
+async def test_overview_counts_study_materials_and_due_flashcards(
+    client, registered_user, subject, seeded_chunks
+):
+    """The material headline figures come from the same response as the rest."""
+
+    await seeded_chunks(["Ready document one.", "Ready document two."], title="Ready.pdf")
+    await seeded_chunks(
+        ["Still processing."], title="Processing.pdf", status="PROCESSING"
+    )
+    await _seed_due_flashcards(registered_user["user_id"], subject, count=3)
+
+    res = await client.get(
+        "/api/v1/analytics/overview", headers=registered_user["headers"]
+    )
+    assert res.status_code == 200
+    totals = res.json()["totals"]
+
+    # Two documents (one still processing); the processing one keeps its chunk,
+    # so two of the three chunks belong to the READY document.
+    assert totals["document_count"] == 2
+    assert totals["ready_document_count"] == 1
+    assert totals["chunk_count"] == 3
+    # Never-studied cards are all due.
+    assert totals["due_flashcard_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_overview_computes_the_average_topic_mastery(
+    client, registered_user, subject
+):
+    """The headline mastery stat is the mean over the user's own topic rows."""
+
+    await _seed_mastery(registered_user["user_id"], subject, "Circulation", 45.0)
+    await _seed_mastery(registered_user["user_id"], subject, "Nervous System", 85.0)
+
+    res = await client.get(
+        "/api/v1/analytics/overview", headers=registered_user["headers"]
+    )
+    assert res.status_code == 200
+    totals = res.json()["totals"]
+
+    # (45.0 + 85.0) / 2, on the same 0-100 scale the engine stores.
+    assert totals["average_topic_mastery"] == 65.0
+
+
+@pytest.mark.asyncio
+async def test_overview_material_totals_scope_to_one_subject(
+    client, registered_user, subject, seeded_chunks
+):
+    """Passing ``subject_id`` narrows the material totals exactly like the rest."""
+
+    other = await client.post(
+        "/api/v1/subjects", json={"title": "Other"}, headers=registered_user["headers"]
+    )
+    other_id = other.json()["id"]
+    await seeded_chunks(["Only in this subject."], title="Scoped.pdf")
+    await _seed_due_flashcards(registered_user["user_id"], subject, count=2)
+    await _seed_due_flashcards(registered_user["user_id"], other_id, count=4)
+
+    res = await client.get(
+        "/api/v1/analytics/overview",
+        params={"subject_id": subject},
+        headers=registered_user["headers"],
+    )
+    totals = res.json()["totals"]
+    assert totals["document_count"] == 1
+    assert totals["ready_document_count"] == 1
+    assert totals["chunk_count"] == 1
+    assert totals["due_flashcard_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_overview_material_totals_exclude_soft_deleted_subjects(
+    client, registered_user, subject, seeded_chunks
+):
+    """Material in a soft-deleted subject no longer counts toward the dashboard."""
+
+    doomed = await client.post(
+        "/api/v1/subjects", json={"title": "Doomed"}, headers=registered_user["headers"]
+    )
+    doomed_id = doomed.json()["id"]
+    async with TestAsyncSessionLocal() as session:
+        doc = Document(
+            subject_id=uuid.UUID(doomed_id),
+            user_id=uuid.UUID(registered_user["user_id"]),
+            title="Doomed.pdf",
+            file_path="",
+            file_size_bytes=10,
+            status="READY",
+        )
+        session.add(doc)
+        await session.commit()
+        await session.refresh(doc)
+        session.add(
+            DocumentChunk(
+                document_id=doc.id,
+                subject_id=uuid.UUID(doomed_id),
+                user_id=uuid.UUID(registered_user["user_id"]),
+                chunk_index=1,
+                content="Doomed chunk.",
+                embedding=await embedding_service.get_embedding("Doomed chunk."),
+            )
+        )
+        await session.commit()
+
+    deleted = await client.delete(
+        f"/api/v1/subjects/{doomed_id}", headers=registered_user["headers"]
+    )
+    assert deleted.status_code == 204
+
+    await seeded_chunks(["Kept chunk."], title="Kept.pdf")
+    res = await client.get(
+        "/api/v1/analytics/overview", headers=registered_user["headers"]
+    )
+    totals = res.json()["totals"]
+    assert totals["document_count"] == 1
+    assert totals["ready_document_count"] == 1
+    assert totals["chunk_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_overview_material_totals_are_owner_scoped(
+    client, registered_user, other_user, subject, seeded_chunks
+):
+    """Another student's material never leaks into the totals."""
+
+    await seeded_chunks(["Private chunk."], title="Private.pdf")
+    await _seed_due_flashcards(registered_user["user_id"], subject, count=3)
+
+    res = await client.get(
+        "/api/v1/analytics/overview", headers=other_user["headers"]
+    )
+    totals = res.json()["totals"]
+    assert totals["document_count"] == 0
+    assert totals["chunk_count"] == 0
+    assert totals["due_flashcard_count"] == 0

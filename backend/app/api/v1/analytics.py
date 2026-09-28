@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Any, List, NamedTuple, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user
 from app.models.attempt import QuizAttempt, QuizAttemptAnswer
+from app.models.document import Document
+from app.models.document_chunk import DocumentChunk
+from app.models.flashcard import Flashcard, FlashcardDeck
 from app.models.mastery import TopicMastery
 from app.models.quiz import Quiz
 from app.models.subject import Subject
@@ -23,6 +27,7 @@ from app.schemas.analytics import (
     WeakReasonRead,
     WeakTopicRead,
 )
+from app.services.flashcard_schedule import due_condition
 from app.services.student_intelligence import compute_accuracy
 from app.services.weak_topics import WeakTopic, load_weak_topics
 
@@ -198,6 +203,70 @@ def _summarize(
     )
 
 
+class _MaterialTotals(NamedTuple):
+    document_count: int
+    ready_document_count: int
+    chunk_count: int
+    due_flashcard_count: int
+
+
+async def _material_totals(
+    db: AsyncSession, user_id: uuid.UUID, subject_id: Optional[uuid.UUID]
+) -> _MaterialTotals:
+    """Study-material aggregates for the overview headline numbers.
+
+    Mirrors the subject count in the overview: only non-deleted subjects owned by
+    ``user_id`` are counted, and an optional ``subject_id`` narrows everything.
+    Due flashcards match the review queue exactly (a never-studied card is due),
+    so the dashboard's "due" figure never drifts from the queue the card deck
+    shows.
+    """
+    subject_filters = [Subject.user_id == user_id, Subject.deleted_at.is_(None)]
+    if subject_id is not None:
+        subject_filters.append(Subject.id == subject_id)
+
+    doc_row = (
+        await db.execute(
+            select(
+                func.count(Document.id),
+                func.coalesce(
+                    func.sum(case((Document.status == "READY", 1), else_=0)), 0
+                ),
+            )
+            .select_from(Document)
+            .join(Subject, Subject.id == Document.subject_id)
+            .where(*subject_filters)
+        )
+    ).one()
+
+    chunk_count = await db.scalar(
+        select(func.count(DocumentChunk.id))
+        .select_from(DocumentChunk)
+        .join(Subject, Subject.id == DocumentChunk.subject_id)
+        .where(*subject_filters)
+    )
+
+    flashcard_count = await db.scalar(
+        select(func.count(Flashcard.id))
+        .select_from(Flashcard)
+        .join(FlashcardDeck, FlashcardDeck.id == Flashcard.deck_id)
+        .join(Subject, Subject.id == FlashcardDeck.subject_id)
+        .where(
+            FlashcardDeck.user_id == user_id,
+            FlashcardDeck.deleted_at.is_(None),
+            due_condition(datetime.utcnow()),
+            *subject_filters,
+        )
+    )
+
+    return _MaterialTotals(
+        document_count=int(doc_row[0] or 0),
+        ready_document_count=int(doc_row[1] or 0),
+        chunk_count=int(chunk_count or 0),
+        due_flashcard_count=int(flashcard_count or 0),
+    )
+
+
 def _to_weak_topic_read(weak_topic: WeakTopic) -> WeakTopicRead:
     return WeakTopicRead(
         subject_id=weak_topic.subject_id,
@@ -336,12 +405,20 @@ async def get_analytics_overview(
     mastery_filters = [TopicMastery.user_id == user_id]
     if subject_id is not None:
         mastery_filters.append(TopicMastery.subject_id == subject_id)
+
+    # The headline mastery stat is the mean of the same rows, aggregated in SQL
+    # so the number always describes the whole history.
+    average_topic_mastery = await db.scalar(
+        select(func.avg(TopicMastery.mastery_score)).where(*mastery_filters)
+    )
     mastery_rows = await db.execute(
         select(TopicMastery)
         .where(*mastery_filters)
         .order_by(TopicMastery.mastery_score.asc(), TopicMastery.topic.asc())
         .limit(limit)
     )
+
+    material = await _material_totals(db, user_id, subject_id)
 
     return AnalyticsOverviewRead(
         totals=LearningTotals(
@@ -356,6 +433,11 @@ async def get_analytics_overview(
             ),
             average_percentage=totals.average_percentage,
             best_percentage=totals.best_percentage,
+            document_count=material.document_count,
+            ready_document_count=material.ready_document_count,
+            chunk_count=material.chunk_count,
+            due_flashcard_count=material.due_flashcard_count,
+            average_topic_mastery=round(float(average_topic_mastery or 0.0), 1),
             first_activity_at=activity[0],
             last_activity_at=activity[1],
         ),

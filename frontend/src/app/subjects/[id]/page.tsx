@@ -195,7 +195,12 @@ export default function SubjectDetailPage() {
 
   useEffect(() => {
     if (recommendedTopic && !isLoading) {
-      const sectionId = focusSection === "materials" ? "study-materials" : "quiz-engine";
+      const sectionId =
+        focusSection === "materials"
+          ? "study-materials"
+          : focusSection === "flashcards"
+            ? "flashcards"
+            : "quiz-engine";
       document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, [focusSection, recommendedTopic, isLoading]);

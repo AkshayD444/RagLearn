@@ -3,11 +3,12 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/useAuthStore";
-import { api, Subject } from "@/lib/api";
+import { api, AnalyticsOverview, Subject } from "@/lib/api";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { SubjectCard } from "@/components/dashboard/SubjectCard";
 import { CreateSubjectModal } from "@/components/dashboard/CreateSubjectModal";
 import { RecommendedForYou } from "@/components/recommendations/RecommendedForYou";
+import { NextBestAction } from "@/components/dashboard/NextBestAction";
 import { StudyPlanSection } from "@/components/study-plan/StudyPlanSection";
 import { DueTodaySection } from "@/components/dashboard/DueTodaySection";
 import { HistorySection } from "@/components/history/HistorySection";
@@ -31,6 +32,7 @@ export default function DashboardPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isFetchingSubjects, setIsFetchingSubjects] = useState(false);
+  const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
 
   useEffect(() => {
     initialize();
@@ -40,6 +42,24 @@ export default function DashboardPage() {
     if (token) {
       fetchSubjects();
     }
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    let active = true;
+    api
+      .getAnalyticsOverview()
+      .then((data) => {
+        if (active) setOverview(data);
+      })
+      .catch((err) => {
+        // The stats row is supplementary; a failed fetch keeps the dashboard
+        // usable and shows the existing placeholders instead of killing it.
+        console.error("Failed to fetch analytics overview:", err);
+      });
+    return () => {
+      active = false;
+    };
   }, [token]);
 
   const fetchSubjects = async () => {
@@ -157,7 +177,9 @@ export default function DashboardPage() {
             </div>
             <div>
               <p className="text-xs text-slate-400 font-medium">RAG Document Chunks</p>
-              <p className="text-2xl font-bold text-white">0 Chunks</p>
+              <p className="text-2xl font-bold text-white">
+                {overview ? `${overview.totals.chunk_count} Chunks` : "0 Chunks"}
+              </p>
             </div>
           </div>
 
@@ -167,12 +189,27 @@ export default function DashboardPage() {
             </div>
             <div>
               <p className="text-xs text-slate-400 font-medium">Topic Mastery Score</p>
-              <p className="text-2xl font-bold text-white">0%</p>
+              <p className="text-2xl font-bold text-white">
+                {overview ? `${Math.round(overview.totals.average_topic_mastery)}%` : "0%"}
+              </p>
             </div>
           </div>
         </div>
 
         {/* Recommended for You */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-sky-400" /> Next Best Action
+            </h2>
+            <p className="text-xs text-slate-400">
+              The single most valuable topic and activity to work on right now, chosen by the Adaptive
+              Learning Engine.
+            </p>
+          </div>
+          <NextBestAction />
+        </section>
+
         <section className="space-y-4">
           <div>
             <h2 className="text-xl font-bold text-white flex items-center gap-2">

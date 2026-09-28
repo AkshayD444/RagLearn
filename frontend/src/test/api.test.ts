@@ -549,3 +549,21 @@ describe("api: bounded history and analytics", () => {
     await expect(api.getAnalyticsOverview()).rejects.toThrow("Not found.");
   });
 });
+
+describe("api next-learning endpoints", () => {
+  it("requests the next best action across all subjects", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ status: "ok", recommendation: null }));
+
+    await api.getNextLearning();
+
+    expect(lastCall()[0]).toBe(`${BASE}/recommendations/next`);
+  });
+
+  it("requests the next best action within one subject", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ status: "ok", recommendation: null }));
+
+    await api.getSubjectNextLearning("subject-1");
+
+    expect(lastCall()[0]).toBe(`${BASE}/recommendations/subjects/subject-1/next`);
+  });
+});

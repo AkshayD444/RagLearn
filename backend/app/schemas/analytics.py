@@ -104,6 +104,16 @@ class LearningTotals(BaseModel):
     accuracy: float = 0.0
     average_percentage: float = 0.0
     best_percentage: float = 0.0
+    #: Study-material figures so the dashboard headline "material" numbers come
+    #: from the same response as the rest of the totals.
+    document_count: int = 0
+    ready_document_count: int = 0
+    chunk_count: int = 0
+    #: Cards currently in the review queue (never-studied cards included).
+    due_flashcard_count: int = 0
+    #: Mean ``mastery_score`` across every topic the student has answered,
+    #: 0-100. ``0.0`` when no topic has any recorded attempt.
+    average_topic_mastery: float = 0.0
     first_activity_at: Optional[datetime] = None
     last_activity_at: Optional[datetime] = None
 

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { makeSubject } from "./factories";
+import { makeLearningTotals, makeAnalyticsOverview, makeSubject } from "./factories";
 
 const pushMock = vi.fn();
 
@@ -10,6 +10,8 @@ vi.mock("@/lib/api", () => ({
     getSubjects: vi.fn(),
     createSubject: vi.fn(),
     deleteSubject: vi.fn(),
+    getAnalyticsOverview: vi.fn(),
+    getNextLearning: vi.fn(),
   },
 }));
 
@@ -27,6 +29,10 @@ vi.mock("@/components/study-plan/StudyPlanSection", () => ({
 
 vi.mock("@/components/dashboard/DueTodaySection", () => ({
   DueTodaySection: () => <div>due-today-stub</div>,
+}));
+
+vi.mock("@/components/dashboard/NextBestAction", () => ({
+  NextBestAction: () => <div>next-best-action-stub</div>,
 }));
 
 // Stubbed, but with the navigation callback re-exposed so the wiring from the
@@ -59,6 +65,8 @@ import { useAuthStore, type AuthState } from "@/store/useAuthStore";
 const getSubjects = vi.mocked(api.getSubjects);
 const createSubject = vi.mocked(api.createSubject);
 const deleteSubject = vi.mocked(api.deleteSubject);
+const getAnalyticsOverview = vi.mocked(api.getAnalyticsOverview);
+const getNextLearning = vi.mocked(api.getNextLearning);
 const useAuthStoreMock = vi.mocked(useAuthStore);
 
 const user = {
@@ -90,8 +98,11 @@ beforeEach(() => {
   getSubjects.mockReset();
   createSubject.mockReset();
   deleteSubject.mockReset();
+  getAnalyticsOverview.mockReset();
+  getNextLearning.mockReset();
   useAuthStoreMock.mockReset();
   getSubjects.mockResolvedValue([]);
+  getAnalyticsOverview.mockResolvedValue(makeAnalyticsOverview());
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -179,15 +190,40 @@ describe("DashboardPage header and stats", () => {
     await waitFor(() => expect(within(stats).getByText("2")).toBeInTheDocument());
   });
 
-  it("renders the placeholder chunk and mastery stats", () => {
+  it("renders live chunk and mastery stats from the analytics overview", async () => {
     mockAuth();
+    getAnalyticsOverview.mockResolvedValue(
+      makeAnalyticsOverview({
+        totals: makeLearningTotals({ chunk_count: 36, average_topic_mastery: 62.5 }),
+      }),
+    );
 
     render(<DashboardPage />);
 
     expect(screen.getByText("RAG Document Chunks")).toBeInTheDocument();
-    expect(screen.getByText("0 Chunks")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("36 Chunks")).toBeInTheDocument());
     expect(screen.getByText("Topic Mastery Score")).toBeInTheDocument();
+    expect(screen.getByText("63%")).toBeInTheDocument();
+  });
+
+  it("keeps placeholder stats when the analytics overview fails to load", async () => {
+    mockAuth();
+    getAnalyticsOverview.mockRejectedValue(new Error("Overview down"));
+
+    render(<DashboardPage />);
+
+    await waitFor(() => expect(console.error).toHaveBeenCalled());
+    expect(screen.getByText("0 Chunks")).toBeInTheDocument();
     expect(screen.getByText("0%")).toBeInTheDocument();
+  });
+
+  it("mounts the next best action section", async () => {
+    mockAuth();
+
+    render(<DashboardPage />);
+
+    expect(screen.getByText("Next Best Action")).toBeInTheDocument();
+    expect(screen.getByText("next-best-action-stub")).toBeInTheDocument();
   });
 
   it("mounts the recommendations and study-plan sections", () => {

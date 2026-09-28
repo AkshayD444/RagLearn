@@ -30,6 +30,7 @@ function weakTopic(overrides: Partial<WeakTopic> = {}): WeakTopic {
         message: "6 incorrect answers across 2 attempts on this topic.",
       },
     ],
+    confidence: "confirmed",
     last_attempt_at: "2026-01-02T09:30:00Z",
     ...overrides,
   };
@@ -339,6 +340,7 @@ describe("StudentIntelligence needs practice", () => {
         reasons: [
           { code: "repeated_mistakes", message: "Three wrong answers." },
           { code: "low_accuracy", message: "Accuracy is 20%." },
+          { code: "recent_poor_performance", message: "The last attempt dropped sharply." },
           { code: "insufficient_evidence", message: "Only 1 question answered." },
         ],
       }),
@@ -348,7 +350,22 @@ describe("StudentIntelligence needs practice", () => {
 
     expect(await screen.findByText("Repeated mistakes")).toBeInTheDocument();
     expect(screen.getByText("Low accuracy")).toBeInTheDocument();
+    expect(screen.getByText("Recent decline")).toBeInTheDocument();
     expect(screen.getByText("Needs more evidence")).toBeInTheDocument();
+  });
+
+  it("labels a confirmed weakness as confirmed and a thin one as low confidence", async () => {
+    getSubjectPerformance.mockResolvedValue(performance());
+    getSubjectWeakTopics.mockResolvedValue([
+      weakTopic({ topic: "Solid", confidence: "confirmed" }),
+      weakTopic({ topic: "Thin", confidence: "low" }),
+    ]);
+
+    render(<StudentIntelligence subjectId="subject-1" />);
+
+    expect(await screen.findByText("Solid")).toBeInTheDocument();
+    expect(screen.getByText("Confirmed")).toBeInTheDocument();
+    expect(screen.getByText("Low confidence")).toBeInTheDocument();
   });
 
   it("falls back to the raw code for an unknown reason", async () => {

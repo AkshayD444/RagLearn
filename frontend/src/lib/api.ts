@@ -284,6 +284,14 @@ export interface LearningTotals {
   accuracy: number;
   average_percentage: number;
   best_percentage: number;
+  /** Counts of non-deleted (active) subjects only, scoped like the rest. */
+  document_count: number;
+  ready_document_count: number;
+  chunk_count: number;
+  /** Cards currently in the review queue, never-studied cards included. */
+  due_flashcard_count: number;
+  /** Mean per-topic mastery across every answered topic, 0-100. */
+  average_topic_mastery: number;
   first_activity_at: string | null;
   last_activity_at: string | null;
 }
@@ -327,6 +335,7 @@ export interface AnalyticsOverview {
 export type WeakReasonCode =
   | "repeated_mistakes"
   | "low_accuracy"
+  | "recent_poor_performance"
   | "insufficient_evidence";
 
 export interface WeakReason {
@@ -350,7 +359,49 @@ export interface WeakTopic {
   questions_correct: number;
   questions_incorrect: number;
   reasons: WeakReason[];
+  /** `"confirmed"` when an aggregate-count rule fired, `"low"` otherwise. */
+  confidence: string;
   last_attempt_at: string | null;
+}
+
+export type NextLearningActivity = "study" | "quiz" | "flashcards";
+
+/**
+ * The winner of the next-learning selection, with its chosen activity.
+ *
+ * `activity_type` is one of the three actions the app can actually deliver;
+ * `due_cards` is how many cards a flashcard recommendation will present.
+ */
+export interface NextLearningRecommendation {
+  subject_id: string;
+  subject_title: string;
+  topic: string;
+  priority: number;
+  mastery: number;
+  mastery_level: string;
+  accuracy: number;
+  weighted_accuracy: number;
+  difficulty_factor: number;
+  questions_attempted: number;
+  activity_type: NextLearningActivity;
+  reason: string;
+  suggested_difficulty: QuizDifficulty;
+  due_cards: number;
+  last_attempt_at: string | null;
+}
+
+/**
+ * The statused envelope around the recommendation.
+ *
+ * `status` is `"ok"` with a `recommendation` present, or
+ * `"insufficient_data"` with `recommendation` null because there is no
+ * learning history yet; the client renders one empty state instead of
+ * branching on a missing schema.
+ */
+export interface NextLearningRead {
+  status: "ok" | "insufficient_data";
+  reason: string;
+  recommendation: NextLearningRecommendation | null;
 }
 
 export type RecommendationType = "REVIEW" | "PRACTICE" | "MAINTAIN";
@@ -803,6 +854,16 @@ class ApiClient {
 
   async getTopRecommendations(limit = 5): Promise<Recommendation[]> {
     return this.request<Recommendation[]>(`/recommendations/top?limit=${limit}`);
+  }
+
+  /** Highest-priority next step across all subjects (see `/recommendations/next`). */
+  async getNextLearning(): Promise<NextLearningRead> {
+    return this.request<NextLearningRead>("/recommendations/next");
+  }
+
+  /** Highest-priority next step within one subject. */
+  async getSubjectNextLearning(subjectId: string): Promise<NextLearningRead> {
+    return this.request<NextLearningRead>(`/recommendations/subjects/${subjectId}/next`);
   }
 
   async generateStudyPlan(payload: StudyPlanGenerateOptions): Promise<StudyPlan> {

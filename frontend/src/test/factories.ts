@@ -10,6 +10,8 @@ import type {
   FlashcardTopicProgress,
   LearningTimelineEntry,
   LearningTotals,
+  NextLearningRead,
+  NextLearningRecommendation,
   Page,
   Quiz,
   QuizAttemptSummary,
@@ -414,8 +416,47 @@ export function makeLearningTotals(overrides: Partial<LearningTotals> = {}): Lea
     accuracy: 73.3,
     average_percentage: 70,
     best_percentage: 80,
+    document_count: 1,
+    ready_document_count: 1,
+    chunk_count: 12,
+    due_flashcard_count: 2,
+    average_topic_mastery: 62.5,
     first_activity_at: "2026-01-04T09:00:00Z",
     last_activity_at: "2026-01-05T09:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeNextLearningRecommendation(
+  overrides: Partial<NextLearningRecommendation> = {},
+): NextLearningRecommendation {
+  return {
+    subject_id: "11111111-1111-4111-8111-111111111111",
+    subject_title: "Organic Chemistry",
+    topic: "Nucleophilic substitution",
+    priority: 82,
+    mastery: 31,
+    mastery_level: "novice",
+    accuracy: 40,
+    weighted_accuracy: 40,
+    difficulty_factor: 1.0,
+    questions_attempted: 10,
+    activity_type: "study",
+    reason: "Low mastery with 6 missed questions.",
+    suggested_difficulty: "medium",
+    due_cards: 0,
+    last_attempt_at: "2026-01-02T00:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeNextLearning(
+  overrides: Partial<NextLearningRead> = {},
+): NextLearningRead {
+  return {
+    status: "ok",
+    reason: "The highest-priority topic is ready.",
+    recommendation: makeNextLearningRecommendation(),
     ...overrides,
   };
 }
