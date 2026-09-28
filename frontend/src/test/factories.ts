@@ -14,6 +14,8 @@ import type {
   NextLearningRecommendation,
   Page,
   Quiz,
+  QuizAttemptAnswer,
+  QuizAttemptDetail,
   QuizAttemptSummary,
   QuizQuestion,
   QuizResultResponse,
@@ -381,6 +383,53 @@ export function makeQuizAttemptSummary(
     percentage: 80,
     started_at: "2026-01-05T08:55:00Z",
     completed_at: "2026-01-05T09:00:00Z",
+    ...overrides,
+  };
+}
+
+export function makeQuizAttemptAnswer(
+  overrides: Partial<QuizAttemptAnswer> = {},
+): QuizAttemptAnswer {
+  return {
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccc01",
+    question_id: "77777777-7777-4777-8777-777777777777",
+    question_text: "Which reagent drives an SN2 reaction?",
+    selected_answer: "A",
+    correct_answer: "A",
+    is_correct: true,
+    difficulty: "medium",
+    topic: "Nucleophilic substitution",
+    time_taken: 4.2,
+    option_a: "Nucleophile",
+    option_b: "Electrophile",
+    option_c: "Chelating agent",
+    option_d: "Reducing agent",
+    explanation: "A nucleophile attacks the electrophile.",
+    source_document_title: "lecture-01.pdf",
+    source_page_number: 4,
+    source_snippet: "SN2 reactions proceed in a single step.",
+    ...overrides,
+  };
+}
+
+export function makeQuizAttemptDetail(
+  overrides: Partial<QuizAttemptDetail> = {},
+): QuizAttemptDetail {
+  return {
+    ...makeQuizAttemptSummary(),
+    topic: "Nucleophilic substitution",
+    answers: [
+      makeQuizAttemptAnswer(),
+      makeQuizAttemptAnswer({
+        id: "cccccccc-cccc-4ccc-8ccc-cccccccccc02",
+        question_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        question_text: "What is the leaving group in SN1?",
+        selected_answer: "B",
+        correct_answer: "C",
+        is_correct: false,
+        explanation: "The leaving group departs first.",
+      }),
+    ],
     ...overrides,
   };
 }

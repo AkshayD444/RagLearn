@@ -167,6 +167,11 @@ class QuizAttemptAnswerRead(BaseModel):
 
     This is the student's own submitted answer, so the explanation and correct
     option are already visible: an attempt is only ever written after grading.
+
+    The snapshot records letters and the question text, but not the option
+    texts or the explanation. Those are enriched from the still-persisted
+    ``quiz_questions`` row for review (a quiz soft-delete keeps its questions),
+    and fall back to ``None`` if the question row is ever gone.
     """
 
     id: uuid.UUID
@@ -179,10 +184,26 @@ class QuizAttemptAnswerRead(BaseModel):
     topic: Optional[str] = None
     time_taken: Optional[float] = None
 
+    # Enriched from the persisted question for review; None if unavailable.
+    option_a: Optional[str] = None
+    option_b: Optional[str] = None
+    option_c: Optional[str] = None
+    option_d: Optional[str] = None
+    explanation: Optional[str] = None
+    source_document_title: Optional[str] = None
+    source_page_number: Optional[int] = None
+    source_snippet: Optional[str] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
 class QuizAttemptDetail(QuizAttemptSummary):
-    """One owned attempt with every answer it recorded."""
+    """One owned attempt with every answer it recorded.
 
+    ``topic`` is a convenience field: when every recorded answer belongs to a
+    single topic, that topic is exposed so the UI can offer "practice this
+    topic again"; otherwise it is ``None``.
+    """
+
+    topic: Optional[str] = None
     answers: List[QuizAttemptAnswerRead] = Field(default_factory=list)

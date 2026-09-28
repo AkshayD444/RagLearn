@@ -198,6 +198,9 @@ export interface QuizAttemptSummary {
  *
  * `correct_answer` is exposed because an attempt row only exists after grading,
  * so this is a record of completed work, not an answer key for a live quiz.
+ * The option texts, explanation, and source citation are enriched from the
+ * still-persisted question row for review and fall back to null if that row is
+ * gone.
  */
 export interface QuizAttemptAnswer {
   id: string;
@@ -209,9 +212,20 @@ export interface QuizAttemptAnswer {
   difficulty: string;
   topic: string | null;
   time_taken: number | null;
+  option_a: string | null;
+  option_b: string | null;
+  option_c: string | null;
+  option_d: string | null;
+  explanation: string | null;
+  source_document_title: string | null;
+  source_page_number: number | null;
+  source_snippet: string | null;
 }
 
 export interface QuizAttemptDetail extends QuizAttemptSummary {
+  /** Set when every answer belongs to the same topic, so the review can offer
+   * "practice this topic again". */
+  topic: string | null;
   answers: QuizAttemptAnswer[];
 }
 

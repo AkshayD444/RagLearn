@@ -194,7 +194,7 @@ export default function SubjectDetailPage() {
   };
 
   useEffect(() => {
-    if (recommendedTopic && !isLoading) {
+    if (!isLoading && (recommendedTopic || focusSection)) {
       const sectionId =
         focusSection === "materials"
           ? "study-materials"

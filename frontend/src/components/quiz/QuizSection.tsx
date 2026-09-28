@@ -16,7 +16,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Flag,
-  FileText,
   BookOpen,
   RotateCcw,
   Target,
@@ -24,6 +23,7 @@ import {
 import { Spinner } from "@/components/shared/Spinner";
 import { ErrorBanner } from "@/components/shared/ErrorBanner";
 import { EmptyState } from "@/components/shared/EmptyState";
+import { QuestionReviewCard } from "@/components/quiz/QuestionReviewCard";
 
 interface QuizSectionProps {
   subjectId: string;
@@ -337,52 +337,21 @@ export function QuizSection({ subjectId, hasReadyDocuments, initialTopic, onAtte
           </h4>
 
           {result.results.map((item, index) => (
-            <div
+            <QuestionReviewCard
               key={item.question_id}
-              className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:p-5 space-y-3"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <p className="text-sm font-bold text-white leading-relaxed">
-                  <span className="text-slate-500 mr-1.5">{index + 1}.</span>
-                  {item.question_text}
-                </p>
-                {item.is_correct ? (
-                  <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
-                ) : (
-                  <XCircle className="h-5 w-5 text-rose-400 shrink-0" />
-                )}
-              </div>
-
-              <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
-                <span
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${
-                    item.is_correct
-                      ? "bg-emerald-950/80 border-emerald-800/60 text-emerald-400"
-                      : "bg-rose-950/80 border-rose-800/60 text-rose-400"
-                  }`}
-                >
-                  Your answer: {item.selected_option}
-                </span>
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/80 border border-emerald-800/60 text-emerald-400">
-                  Correct: {item.correct_option}
-                </span>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800 text-xs text-slate-300 leading-relaxed">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Explanation</p>
-                {item.explanation}
-              </div>
-
-              {item.source_document_title && (
-                <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                  <FileText className="h-3.5 w-3.5 text-sky-400 shrink-0" />
-                  <span className="truncate font-semibold text-sky-300">{item.source_document_title}</span>
-                  {item.source_page_number != null && (
-                    <span className="shrink-0">• Page {item.source_page_number}</span>
-                  )}
-                </div>
-              )}
-            </div>
+              index={index}
+              question={{
+                questionText: item.question_text,
+                selectedAnswer: item.selected_option,
+                correctAnswer: item.correct_option,
+                isCorrect: item.is_correct,
+                explanation: item.explanation,
+                options: null,
+                sourceDocumentTitle: item.source_document_title,
+                sourcePageNumber: item.source_page_number,
+                sourceSnippet: item.source_snippet,
+              }}
+            />
           ))}
         </div>
 

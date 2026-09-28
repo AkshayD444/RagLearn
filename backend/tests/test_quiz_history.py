@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.models.attempt import QuizAttempt, QuizAttemptAnswer
 from app.models.quiz import Quiz, QuizQuestion
@@ -56,6 +56,9 @@ async def _seed_quiz(
                     explanation="Because.",
                     difficulty=difficulty,
                     topic="Retrieval",
+                    document_title="materials.pdf",
+                    page_number=4,
+                    source_snippet="A source passage that grounds this question.",
                 )
             )
         await session.commit()
@@ -390,6 +393,103 @@ async def test_get_quiz_attempt_returns_recorded_answers(
 
 
 @pytest.mark.asyncio
+async def test_get_quiz_attempt_enriches_answers_from_questions(
+    client, registered_user, subject
+):
+    quiz_id = await _seed_quiz(registered_user["user_id"], subject, questions=2)
+    attempt_id = await _seed_attempt(registered_user["user_id"], subject, quiz_id)
+
+    res = await client.get(
+        f"/api/v1/quizzes/attempts/{attempt_id}", headers=registered_user["headers"]
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body["answers"]) == 2
+
+    # The recorded letters stay the source of truth...
+    for answer in body["answers"]:
+        assert answer["selected_answer"] == "A"
+        assert answer["correct_answer"] == "A"
+        # ...and the persisted question fills in the review fields: the option
+        # texts, the explanation, and the citation back to the source.
+        assert answer["option_a"] == "A"
+        assert answer["option_b"] == "B"
+        assert answer["option_c"] == "C"
+        assert answer["option_d"] == "D"
+        assert answer["explanation"] == "Because."
+        assert answer["source_document_title"] == "materials.pdf"
+        assert answer["source_page_number"] == 4
+        assert answer["source_snippet"]
+    # Every answer belongs to the same topic, so the convenience field exposes it.
+    assert body["topic"] == "Retrieval"
+
+
+@pytest.mark.asyncio
+async def test_get_quiz_attempt_hides_shared_topic_when_answers_span_topics(
+    client, registered_user, subject
+):
+    quiz_id = await _seed_quiz(registered_user["user_id"], subject, questions=2)
+    attempt_id = await _seed_attempt(registered_user["user_id"], subject, quiz_id)
+
+    # Push one answer onto a different topic so the attempt no longer has a
+    # single shared topic; the convenience field must then be null.
+    async with TestAsyncSessionLocal() as session:
+        answer = (
+            await session.execute(
+                select(QuizAttemptAnswer)
+                .where(QuizAttemptAnswer.attempt_id == uuid.UUID(attempt_id))
+                .limit(1)
+            )
+        ).scalars().first()
+        answer.topic = "Ranking"
+        await session.commit()
+
+    res = await client.get(
+        f"/api/v1/quizzes/attempts/{attempt_id}", headers=registered_user["headers"]
+    )
+    assert res.status_code == 200
+    assert res.json()["topic"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_quiz_attempt_falls_back_when_question_is_gone(
+    client, registered_user, subject
+):
+    quiz_id = await _seed_quiz(registered_user["user_id"], subject, questions=2)
+    attempt_id = await _seed_attempt(registered_user["user_id"], subject, quiz_id)
+
+    # Remove the question rows behind the answers (SQLite does not cascade, so
+    # the recorded attempt answers survive). The detail must still read the
+    # recorded answer and degrade the richer review fields to null instead of
+    # failing.
+    async with TestAsyncSessionLocal() as session:
+        await session.execute(
+            delete(QuizQuestion).where(QuizQuestion.quiz_id == uuid.UUID(quiz_id))
+        )
+        await session.commit()
+
+    res = await client.get(
+        f"/api/v1/quizzes/attempts/{attempt_id}", headers=registered_user["headers"]
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body["answers"]) == 2
+    for answer in body["answers"]:
+        assert answer["question_text"]
+        assert answer["selected_answer"] == "A"
+        assert answer["correct_answer"] == "A"
+        assert answer["is_correct"] is True
+        assert answer["option_a"] is None
+        assert answer["option_b"] is None
+        assert answer["option_c"] is None
+        assert answer["option_d"] is None
+        assert answer["explanation"] is None
+        assert answer["source_document_title"] is None
+        assert answer["source_page_number"] is None
+        assert answer["source_snippet"] is None
+
+
+@pytest.mark.asyncio
 async def test_attempts_of_a_deleted_quiz_remain_reviewable(
     client, registered_user, subject
 ):
@@ -410,4 +510,10 @@ async def test_attempts_of_a_deleted_quiz_remain_reviewable(
         f"/api/v1/quizzes/attempts/{attempt_id}", headers=registered_user["headers"]
     )
     assert detail.status_code == 200
-    assert len(detail.json()["answers"]) == 2
+    body = detail.json()
+    assert len(body["answers"]) == 2
+    # A soft-deleted quiz keeps its questions, so the review stays fully rich.
+    for answer in body["answers"]:
+        assert answer["explanation"] == "Because."
+        assert answer["source_document_title"] == "materials.pdf"
+        assert answer["source_page_number"] == 4

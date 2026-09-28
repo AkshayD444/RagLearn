@@ -214,6 +214,38 @@ def _to_attempt_summary(
     )
 
 
+def _to_attempt_answer_read(
+    answer: QuizAttemptAnswer, question: Optional[QuizQuestion]
+) -> QuizAttemptAnswerRead:
+    """The recorded snapshot, enriched with the question's review fields.
+
+    The answer letters and question text come from the snapshot itself (the
+    source of truth), while options, explanation, and citation come from the
+    still-persisted question row when it exists. A missing question (for
+    example after the quiz was hard-deleted behind a soft-delete) yields a
+    review card that still reads the recorded answer but has no richer detail.
+    """
+    return QuizAttemptAnswerRead(
+        id=answer.id,
+        question_id=answer.question_id,
+        question_text=answer.question_text,
+        selected_answer=answer.selected_answer,
+        correct_answer=answer.correct_answer,
+        is_correct=answer.is_correct,
+        difficulty=answer.difficulty,
+        topic=answer.topic,
+        time_taken=answer.time_taken,
+        option_a=question.option_a if question else None,
+        option_b=question.option_b if question else None,
+        option_c=question.option_c if question else None,
+        option_d=question.option_d if question else None,
+        explanation=question.explanation if question else None,
+        source_document_title=question.document_title if question else None,
+        source_page_number=question.page_number if question else None,
+        source_snippet=question.source_snippet if question else None,
+    )
+
+
 @router.get("", response_model=Page[QuizSummary])
 async def list_quizzes(
     subject_id: Optional[uuid.UUID] = None,
@@ -310,16 +342,27 @@ async def get_quiz_attempt(
     attempt, quiz_title, subject_title = found
 
     answers = await db.execute(
-        select(QuizAttemptAnswer)
+        select(QuizAttemptAnswer, QuizQuestion)
+        .outerjoin(QuizQuestion, QuizQuestion.id == QuizAttemptAnswer.question_id)
         .where(QuizAttemptAnswer.attempt_id == attempt.id)
         .order_by(QuizAttemptAnswer.created_at, QuizAttemptAnswer.id)
         .limit(MAX_ATTEMPT_ANSWERS)
     )
+    answer_rows = answers.all()
+    answer_reads = [
+        _to_attempt_answer_read(answer, question)
+        for answer, question in answer_rows
+    ]
+
+    # A single shared topic lets the UI offer "practice this topic again".
+    shared_topics = {answer.topic for answer, _ in answer_rows if answer.topic}
+    shared_topic = next(iter(shared_topics)) if len(shared_topics) == 1 else None
 
     detail = _to_attempt_summary(attempt, quiz_title, subject_title)
     return QuizAttemptDetail(
         **detail.model_dump(),
-        answers=[QuizAttemptAnswerRead.model_validate(a) for a in answers.scalars().all()],
+        topic=shared_topic,
+        answers=answer_reads,
     )
 
 

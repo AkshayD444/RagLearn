@@ -1,16 +1,23 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   api,
   AnalyticsOverview,
   Page,
+  QuizAttemptAnswer,
+  QuizAttemptDetail,
   QuizAttemptSummary,
   QuizSummary,
 } from "@/lib/api";
-import { ChevronLeft, ChevronRight, History, ListChecks, Trophy } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, History, ListChecks, PlayCircle, Trophy, X } from "lucide-react";
 import { Spinner } from "@/components/shared/Spinner";
 import { ErrorBanner } from "@/components/shared/ErrorBanner";
+import {
+  QuestionReviewCard,
+  QuestionReviewItem,
+} from "@/components/quiz/QuestionReviewCard";
 
 interface HistorySectionProps {
   /** Scopes every panel to one subject; omit for the cross-subject dashboard. */
@@ -51,6 +58,33 @@ function formatPercent(value: number): string {
 
 function plural(count: number, singular: string, pluralForm: string): string {
   return count === 1 ? singular : pluralForm;
+}
+
+const OPTION_KEYS = [
+  { letter: "A", field: "option_a" },
+  { letter: "B", field: "option_b" },
+  { letter: "C", field: "option_c" },
+  { letter: "D", field: "option_d" },
+] as const;
+
+/** Maps a recorded attempt answer to the shared review card shape. */
+function toReviewItem(answer: QuizAttemptAnswer): QuestionReviewItem {
+  const options: { letter: string; text: string }[] = [];
+  for (const { letter, field } of OPTION_KEYS) {
+    const text = answer[field];
+    if (text != null) options.push({ letter, text });
+  }
+  return {
+    questionText: answer.question_text,
+    selectedAnswer: answer.selected_answer,
+    correctAnswer: answer.correct_answer,
+    isCorrect: answer.is_correct,
+    explanation: answer.explanation,
+    options: options.length > 0 ? options : null,
+    sourceDocumentTitle: answer.source_document_title,
+    sourcePageNumber: answer.source_page_number,
+    sourceSnippet: answer.source_snippet,
+  };
 }
 
 /** A score pill that reads as success or as "work to do". */
@@ -163,6 +197,7 @@ export function HistorySection({
   timelineLimit = 10,
   onNavigateToSubject,
 }: HistorySectionProps) {
+  const router = useRouter();
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [isLoadingOverview, setIsLoadingOverview] = useState(true);
   const [overviewError, setOverviewError] = useState<string | null>(null);
@@ -174,6 +209,11 @@ export function HistorySection({
   const [attemptPaging, setAttemptPaging] = useState<Paging>(INITIAL_PAGING);
   const [isLoadingList, setIsLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+
+  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null);
+  const [attemptDetail, setAttemptDetail] = useState<QuizAttemptDetail | null>(null);
+  const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -240,6 +280,37 @@ export function HistorySection({
   const changePage = (offset: number) => {
     setIsLoadingList(true);
     loadList(tab, offset);
+  };
+
+  const openAttempt = async (attemptId: string) => {
+    setSelectedAttemptId(attemptId);
+    setAttemptDetail(null);
+    setDetailError(null);
+    setIsLoadingDetail(true);
+    try {
+      const detail = await api.getQuizAttempt(attemptId);
+      setAttemptDetail(detail);
+    } catch (err: any) {
+      setDetailError(err.message || "Failed to load this attempt.");
+    } finally {
+      setIsLoadingDetail(false);
+    }
+  };
+
+  const closeAttempt = () => {
+    setSelectedAttemptId(null);
+    setAttemptDetail(null);
+    setDetailError(null);
+  };
+
+  /**
+   * Re-opens the attempt's subject in the quiz engine, pre-filled with the
+   * attempt's topic when every answer shared one, so the existing generate
+   * flow produces a fresh quiz on the material that was just reviewed.
+   */
+  const practiceAgain = (detail: QuizAttemptDetail) => {
+    const base = `/subjects/${detail.subject_id}?focus=quiz-engine`;
+    router.push(detail.topic ? `${base}&topic=${encodeURIComponent(detail.topic)}` : base);
   };
 
   const totals = overview?.totals;
@@ -317,6 +388,86 @@ export function HistorySection({
         </div>
       )}
 
+      {selectedAttemptId && (
+        <div
+          className="p-4 sm:p-5 rounded-2xl border border-slate-800 bg-slate-900/60 space-y-4"
+          data-testid="attempt-review"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-0.5">
+              <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                <BookOpen className="h-3.5 w-3.5 text-purple-400" /> Attempt review
+              </h4>
+              {attemptDetail && (
+                <p className="text-[10px] text-slate-500 truncate">
+                  {attemptDetail.quiz_title} &middot; {attemptDetail.subject_title} &middot;{" "}
+                  {formatDate(attemptDetail.completed_at)}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {attemptDetail && (
+                <button
+                  type="button"
+                  onClick={() => practiceAgain(attemptDetail)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-semibold transition-colors"
+                >
+                  <PlayCircle className="h-3.5 w-3.5" /> Practice Again
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={closeAttempt}
+                aria-label="Close attempt review"
+                className="inline-flex items-center p-1.5 rounded-lg border border-slate-800 text-slate-400 hover:text-white hover:border-slate-600 transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {isLoadingDetail ? (
+            <div className="flex items-center justify-center py-4">
+              <Spinner />
+            </div>
+          ) : detailError ? (
+            <ErrorBanner message={detailError} />
+          ) : attemptDetail ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <ScorePill percentage={attemptDetail.percentage} />
+                <span className="text-slate-500">
+                  {attemptDetail.score}/{attemptDetail.total_questions} correct &middot;{" "}
+                  {attemptDetail.answers.length}{" "}
+                  {plural(attemptDetail.answers.length, "question", "questions")}
+                </span>
+                {attemptDetail.topic && (
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-purple-950/80 border border-purple-800/60 text-purple-300 text-[10px] font-semibold">
+                    {attemptDetail.topic}
+                  </span>
+                )}
+              </div>
+
+              {attemptDetail.answers.length === 0 ? (
+                <p className="text-[11px] text-slate-500">
+                  No per-question records were saved for this attempt.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {attemptDetail.answers.map((answer, index) => (
+                    <QuestionReviewCard
+                      key={answer.id}
+                      index={index}
+                      question={toReviewItem(answer)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          ) : null}
+        </div>
+      )}
+
       <div className="p-4 sm:p-5 rounded-2xl border border-slate-800 bg-slate-900/60 space-y-3">
         <div className="flex items-center gap-1.5" role="tablist" aria-label="History type">
           {(
@@ -383,20 +534,24 @@ export function HistorySection({
                   </li>
                 ))
               : (attempts as QuizAttemptSummary[]).map((attempt) => (
-                  <li
-                    key={attempt.id}
-                    className="flex items-center gap-3 rounded-xl border border-slate-800/70 bg-slate-950/40 px-3 py-2.5"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[11px] font-semibold text-slate-200 truncate">
-                        {attempt.quiz_title}
-                      </p>
-                      <p className="text-[10px] text-slate-600 truncate">
-                        {attempt.subject_title} &middot; {formatDate(attempt.completed_at)} &middot;{" "}
-                        {attempt.score}/{attempt.total_questions}
-                      </p>
-                    </div>
-                    <ScorePill percentage={attempt.percentage} />
+                  <li key={attempt.id}>
+                    <button
+                      type="button"
+                      onClick={() => openAttempt(attempt.id)}
+                      aria-label={`Review attempt for ${attempt.quiz_title}`}
+                      className="w-full flex items-center gap-3 rounded-xl border border-slate-800/70 bg-slate-950/40 px-3 py-2.5 text-left hover:border-sky-600/60 hover:bg-slate-900/50 transition-colors"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-semibold text-slate-200 truncate">
+                          {attempt.quiz_title}
+                        </p>
+                        <p className="text-[10px] text-slate-600 truncate">
+                          {attempt.subject_title} &middot; {formatDate(attempt.completed_at)} &middot;{" "}
+                          {attempt.score}/{attempt.total_questions}
+                        </p>
+                      </div>
+                      <ScorePill percentage={attempt.percentage} />
+                    </button>
                   </li>
                 ))}
           </ul>

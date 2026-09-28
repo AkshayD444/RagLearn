@@ -248,6 +248,10 @@ describe("QuizSection submission", () => {
     expect(screen.getByText("A nucleophile attacks the electrophile.")).toBeInTheDocument();
     expect(screen.getByText("lecture-01.pdf")).toBeInTheDocument();
     expect(screen.getByText("• Page 4")).toBeInTheDocument();
+    // The live result renders through the shared review card, which only lists
+    // the option texts when an attempt review can recover them.
+    expect(screen.queryByText("Nucleophile")).not.toBeInTheDocument();
+    expect(screen.queryByText("Electrophile")).not.toBeInTheDocument();
   });
 
   it("rounds the displayed percentage", async () => {

@@ -9,6 +9,7 @@ import {
   makeFlashcardReviewSummary,
   makeFlashcardTopicProgress,
   makePage,
+  makeQuizAttemptDetail,
   makeQuizAttemptSummary,
   makeQuizSummary,
   makeSubject,
@@ -529,6 +530,24 @@ describe("api: bounded history and analytics", () => {
     const url = new URL(lastCall()[0]);
     expect(url.pathname).toBe("/api/v1/quizzes/attempts");
     expect(url.searchParams.get("limit")).toBe("5");
+  });
+
+  it("fetches one attempt enriched with review fields", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(makeQuizAttemptDetail()));
+
+    const detail = await api.getQuizAttempt("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+
+    expect(detail.answers[0]).toMatchObject({
+      option_a: "Nucleophile",
+      option_b: "Electrophile",
+      explanation: "A nucleophile attacks the electrophile.",
+      source_document_title: "lecture-01.pdf",
+      source_page_number: 4,
+      source_snippet: "SN2 reactions proceed in a single step.",
+    });
+    expect(detail.topic).toBe("Nucleophilic substitution");
+    const url = new URL(lastCall()[0]);
+    expect(url.pathname).toBe("/api/v1/quizzes/attempts/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
   });
 
   it("requests the analytics overview and returns the aggregate", async () => {

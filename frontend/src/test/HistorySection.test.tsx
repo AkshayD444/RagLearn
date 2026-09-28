@@ -7,9 +7,16 @@ import {
   makeAnalyticsOverview,
   makeLearningTotals,
   makePage,
+  makeQuizAttemptDetail,
   makeQuizAttemptSummary,
   makeQuizSummary,
 } from "./factories";
+
+const push = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: (...args: unknown[]) => push(...args) }),
+}));
 
 function stubApi(overrides: Partial<Record<keyof typeof api, unknown>> = {}) {
   const methods = {
@@ -31,8 +38,17 @@ function attemptList() {
   return screen.getByTestId("history-list-attempts");
 }
 
+/** Renders the section and switches to the Attempts tab, where rows are clickable. */
+async function openAttemptsTab() {
+  render(<HistorySection />);
+  await screen.findByTestId("history-list-quizzes");
+  fireEvent.click(screen.getByRole("tab", { name: "Attempts" }));
+  await screen.findByTestId("history-list-attempts");
+}
+
 describe("HistorySection", () => {
   beforeEach(() => {
+    push.mockReset();
     stubApi();
   });
 
@@ -261,5 +277,81 @@ describe("HistorySection", () => {
 
     expect(await screen.findByText("Topics to revisit")).toBeInTheDocument();
     expect(screen.getByText("Nucleophilic substitution")).toBeInTheDocument();
+  });
+
+  it("opens an attempt review with the recorded answers and citations", async () => {
+    const getQuizAttempt = vi.fn().mockResolvedValue(makeQuizAttemptDetail());
+    stubApi({ getQuizAttempt });
+
+    await openAttemptsTab();
+    fireEvent.click(await screen.findByRole("button", { name: /Review attempt for/ }));
+
+    await waitFor(() =>
+      expect(getQuizAttempt).toHaveBeenCalledWith("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+    );
+    const review = await screen.findByTestId("attempt-review");
+
+    expect(within(review).getByText("Which reagent drives an SN2 reaction?")).toBeInTheDocument();
+    expect(within(review).getByText("Your answer: A")).toBeInTheDocument();
+    expect(within(review).getByText("Correct: A")).toBeInTheDocument();
+    expect(within(review).getByText("A nucleophile attacks the electrophile.")).toBeInTheDocument();
+    // The recovered option texts let the reviewer re-read the choices.
+    // (Both recorded answers in this fixture share the same option texts.)
+    expect(within(review).getAllByText("Nucleophile").length).toBeGreaterThan(0);
+    expect(within(review).getAllByText("Electrophile").length).toBeGreaterThan(0);
+    // The citation back to the source.
+    expect(within(review).getAllByText("lecture-01.pdf").length).toBeGreaterThan(0);
+    expect(within(review).getAllByText("• Page 4").length).toBeGreaterThan(0);
+    // A single shared topic is surfaced as the attempt's topic.
+    expect(within(review).getByText("Nucleophilic substitution")).toBeInTheDocument();
+  });
+
+  it("closes the attempt review", async () => {
+    stubApi({ getQuizAttempt: vi.fn().mockResolvedValue(makeQuizAttemptDetail()) });
+
+    await openAttemptsTab();
+    fireEvent.click(await screen.findByRole("button", { name: /Review attempt for/ }));
+    await screen.findByTestId("attempt-review");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close attempt review" }));
+
+    expect(screen.queryByTestId("attempt-review")).not.toBeInTheDocument();
+  });
+
+  it("practices again in the quiz engine scoped to the shared topic", async () => {
+    stubApi({ getQuizAttempt: vi.fn().mockResolvedValue(makeQuizAttemptDetail()) });
+
+    await openAttemptsTab();
+    fireEvent.click(await screen.findByRole("button", { name: /Review attempt for/ }));
+    await screen.findByTestId("attempt-review");
+
+    fireEvent.click(screen.getByRole("button", { name: /Practice Again/ }));
+
+    expect(push).toHaveBeenCalledWith(
+      "/subjects/11111111-1111-4111-8111-111111111111?focus=quiz-engine&topic=Nucleophilic%20substitution",
+    );
+  });
+
+  it("practices again without a topic when the attempt spans topics", async () => {
+    stubApi({ getQuizAttempt: vi.fn().mockResolvedValue(makeQuizAttemptDetail({ topic: null })) });
+
+    await openAttemptsTab();
+    fireEvent.click(await screen.findByRole("button", { name: /Review attempt for/ }));
+    await screen.findByTestId("attempt-review");
+
+    fireEvent.click(screen.getByRole("button", { name: /Practice Again/ }));
+
+    expect(push).toHaveBeenCalledWith(
+      "/subjects/11111111-1111-4111-8111-111111111111?focus=quiz-engine",
+    );
+  });
+
+  it("surfaces an attempt detail error", async () => {
+    stubApi({ getQuizAttempt: vi.fn().mockRejectedValue(new Error("Attempt unavailable.")) });
+
+    await openAttemptsTab();
+    fireEvent.click(await screen.findByRole("button", { name: /Review attempt for/ }));
+
+    expect(await screen.findByText("Attempt unavailable.")).toBeInTheDocument();
   });
 });
