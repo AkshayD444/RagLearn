@@ -1,13 +1,56 @@
+import asyncio
 import uuid
 import os
 from pypdf import PdfReader
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
+from app.core.logging_config import get_logger
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
 from app.rag.text_splitter import RecursiveTextSplitter
 from app.rag.embeddings import embedding_service
+from app.services.document_recovery import INTERRUPTED_PROCESSING_ERROR
+
+logger = get_logger("app.documents")
+
+
+async def _mark_failed(
+    session: AsyncSession, document_id: uuid.UUID, message: str
+) -> None:
+    """Records a terminal FAILED state so a document cannot sit in PROCESSING.
+
+    Shared by the error path and the cancellation path below so both land on the
+    same shape: ``status="FAILED"`` plus a non-null ``error_message`` the UI can
+    show. The pending chunk inserts are rolled back first, because the session
+    that failed may still be holding them.
+
+    Best effort: this runs while something has already gone wrong, and a
+    database that is refusing writes must not turn a recorded failure into an
+    unhandled exception. If this write does not land, the row stays PROCESSING
+    and the startup sweep in app/services/document_recovery.py picks it up on the
+    next start.
+    """
+    try:
+        await session.rollback()
+        result = await session.execute(
+            select(Document).where(Document.id == document_id)
+        )
+        failed_doc = result.scalar_one_or_none()
+        if failed_doc:
+            failed_doc.status = "FAILED"
+            failed_doc.error_message = message
+            await session.commit()
+        logger.warning(
+            "document_processing_failed",
+            extra={"document_id": str(document_id), "error": message},
+        )
+    except Exception:
+        logger.exception(
+            "could_not_record_document_failure",
+            extra={"document_id": str(document_id)},
+        )
 
 
 async def process_document_file(
@@ -75,14 +118,22 @@ async def process_document_file(
             doc.error_message = None
             await session.commit()
 
-        except Exception as e:
-            await session.rollback()
-            # Fetch doc again to record failure state
-            res = await session.execute(
-                select(Document).where(Document.id == document_id)
+            logger.info(
+                "document_processed",
+                extra={
+                    "document_id": str(document_id),
+                    "chunks": len(chunks),
+                },
             )
-            failed_doc = res.scalar_one_or_none()
-            if failed_doc:
-                failed_doc.status = "FAILED"
-                failed_doc.error_message = str(e)
-                await session.commit()
+
+        except asyncio.CancelledError:
+            # B6: a graceful shutdown (SIGTERM during a rolling deploy) cancels
+            # this task, and CancelledError is not an Exception, so the generic
+            # handler below never saw it -- the document was left in PROCESSING
+            # with nothing left running. Recording the interruption first means a
+            # rolling deploy does not strand uploads; a hard kill still cannot
+            # write anything at all, which is what the startup sweep is for.
+            await _mark_failed(session, document_id, INTERRUPTED_PROCESSING_ERROR)
+            raise
+        except Exception as e:
+            await _mark_failed(session, document_id, str(e))
