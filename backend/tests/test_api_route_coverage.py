@@ -75,6 +75,14 @@ async def test_health_db_endpoint_reports_healthy_when_connected(client, monkeyp
 
 @pytest.mark.asyncio
 async def test_health_db_endpoint_degrades_when_disconnected(client, monkeypatch):
+    """A3: a broken database is a 503, and the driver error is not echoed.
+
+    This test previously asserted a 200 *and* that the raw ``"connection
+    refused"`` text reached the caller. Both encoded the old behaviour, which
+    (a) hid the outage from any monitor that checks status codes and (b) handed
+    an unauthenticated caller whatever the driver said, typically including the
+    host, port, database name and username.
+    """
     import app.api.v1.health as health_api
 
     monkeypatch.setattr(
@@ -90,15 +98,23 @@ async def test_health_db_endpoint_degrades_when_disconnected(client, monkeypatch
         ),
     )
     res = await client.get("/api/v1/health/db")
-    assert res.status_code == 200
+    # 503 so an uptime monitor sees the dependency failure.
+    assert res.status_code == 503
     body = res.json()
     assert body["status"] == "degraded"
-    assert body["database"]["error"] == "connection refused"
+    # The raw driver text is filtered out by the endpoint's field allow-list.
+    assert "error" not in body["database"]
+    assert "connection refused" not in res.text
 
 
 @pytest.mark.asyncio
-async def test_check_database_connection_never_raises(monkeypatch):
-    """The helper degrades gracefully instead of propagating a driver error."""
+async def test_check_database_connection_never_raises(monkeypatch, caplog):
+    """The helper degrades gracefully instead of propagating a driver error.
+
+    A3: it must also stop reporting the exception text. The detail belongs in
+    the log, where it is attributed to a request and visible to an operator,
+    not in an anonymous HTTP response.
+    """
     from app.core.database import check_database_connection
 
     class _BrokenSession:
@@ -112,11 +128,19 @@ async def test_check_database_connection_never_raises(monkeypatch):
             raise RuntimeError("driver exploded")
 
     monkeypatch.setattr("app.core.database.AsyncSessionLocal", _BrokenSession)
-    result = await check_database_connection()
+    with caplog.at_level("ERROR", logger="app.database"):
+        result = await check_database_connection()
+
     assert result["status"] == "disconnected"
     assert result["select_one"] is False
     assert result["pgvector_installed"] is False
-    assert "driver exploded" in result["error"]
+    # Generic message to the caller...
+    assert "driver exploded" not in str(result)
+    assert "error" not in result
+    # ...but the operator still gets the real cause.
+    logged = caplog.text
+    assert "database_health_check_failed" in logged
+    assert "driver exploded" in logged
 
 
 @pytest.mark.asyncio
@@ -393,11 +417,16 @@ async def test_deleting_a_subject_twice_is_a_404(client, registered_user, subjec
 
 
 @pytest.mark.asyncio
-async def test_subject_routes_require_authentication(client, subject):
-    assert (await client.get("/api/v1/subjects")).status_code == 401
-    assert (await client.post("/api/v1/subjects", json={"title": "x"})).status_code == 401
-    assert (await client.get(f"/api/v1/subjects/{subject}")).status_code == 401
-    assert (await client.delete(f"/api/v1/subjects/{subject}")).status_code == 401
+async def test_subject_routes_require_authentication(anonymous_client, subject):
+    # B2: these run on `anonymous_client`, not the shared `client`. Auth moved
+    # from a header the caller must send to a cookie the browser attaches on its
+    # own, so the shared client is signed in from the moment it registers and
+    # would answer 200 here -- the assertion would pass without testing anything.
+    c = anonymous_client
+    assert (await c.get("/api/v1/subjects")).status_code == 401
+    assert (await c.post("/api/v1/subjects", json={"title": "x"})).status_code == 401
+    assert (await c.get(f"/api/v1/subjects/{subject}")).status_code == 401
+    assert (await c.delete(f"/api/v1/subjects/{subject}")).status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -672,8 +701,10 @@ async def test_performance_survives_a_soft_deleted_subject(client, registered_us
 
 
 @pytest.mark.asyncio
-async def test_performance_requires_authentication(client, subject):
-    res = await client.get(f"/api/v1/analytics/subjects/{subject}/performance")
+async def test_performance_requires_authentication(anonymous_client, subject):
+    res = await anonymous_client.get(
+        f"/api/v1/analytics/subjects/{subject}/performance"
+    )
     assert res.status_code == 401
 
 
