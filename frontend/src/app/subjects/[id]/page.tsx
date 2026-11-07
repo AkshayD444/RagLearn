@@ -50,7 +50,7 @@ export default function SubjectDetailPage() {
   const recommendedTopic = searchParams.get("topic")?.trim() || null;
   const focusSection = searchParams.get("focus");
 
-  const { user, token, initialize } = useAuthStore();
+  const { user, isAuthenticated, initialize } = useAuthStore();
   const [subject, setSubject] = useState<Subject | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -65,15 +65,15 @@ export default function SubjectDetailPage() {
   }, [initialize]);
 
   // Auth has to settle before it is meaningful to fetch: `isLoading` starts
-  // true, and without a token there is nothing to load, so the spinner would
+  // true, and without a session there is nothing to load, so the spinner would
   // otherwise never stop.
   useEffect(() => {
-    if (token && subjectId) {
+    if (isAuthenticated && subjectId) {
       fetchSubjectData();
-    } else if (!token) {
+    } else if (!isAuthenticated) {
       setIsLoading(false);
     }
-  }, [token, subjectId]);
+  }, [isAuthenticated, subjectId]);
 
   // Clear any in-flight poll timers on unmount so a status loop cannot outlive
   // the page that started it.

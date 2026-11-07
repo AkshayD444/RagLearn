@@ -66,7 +66,7 @@ const SUBJECT_ID = "11111111-1111-4111-8111-111111111111";
 function mockAuth(overrides: Partial<AuthState> = {}) {
   useAuthStoreMock.mockReturnValue({
     user: null,
-    token: "jwt-token-value",
+    isAuthenticated: true,
     isLoading: false,
     error: null,
     initialize: vi.fn(),
@@ -106,7 +106,7 @@ async function renderReady() {
 
 describe("SubjectDetailPage auth gating", () => {
   it("settles the spinner when there is no session instead of loading forever", async () => {
-    mockAuth({ token: null });
+    mockAuth({ isAuthenticated: false });
     render(<SubjectDetailPage />);
 
     await waitFor(() =>
@@ -116,13 +116,13 @@ describe("SubjectDetailPage auth gating", () => {
   });
 
   it("waits for a session before fetching", async () => {
-    mockAuth({ token: null });
+    mockAuth({ isAuthenticated: false });
     render(<SubjectDetailPage />);
 
     expect(getSubject).not.toHaveBeenCalled();
   });
 
-  it("loads the subject and its documents once a token exists", async () => {
+  it("loads the subject and its documents once a session exists", async () => {
     await renderReady();
 
     expect(getSubjectDocuments).toHaveBeenCalledWith(SUBJECT_ID);

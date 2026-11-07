@@ -79,7 +79,7 @@ const user = {
 function mockAuth(overrides: Partial<AuthState> = {}) {
   const state = {
     user,
-    token: "jwt-token-value",
+    isAuthenticated: true,
     isLoading: false,
     error: null,
     initialize: vi.fn(),
@@ -116,7 +116,7 @@ describe("DashboardPage auth gating", () => {
   });
 
   it("shows only the auth modal when there is no session", () => {
-    mockAuth({ user: null, token: null });
+    mockAuth({ user: null, isAuthenticated: false });
 
     render(<DashboardPage />);
 
@@ -124,7 +124,7 @@ describe("DashboardPage auth gating", () => {
     expect(screen.queryByText("My Subjects")).not.toBeInTheDocument();
   });
 
-  it("shows only the auth modal when there is a token but no user", () => {
+  it("shows only the auth modal when there is a session but no user", () => {
     mockAuth({ user: null });
 
     render(<DashboardPage />);
@@ -140,8 +140,8 @@ describe("DashboardPage auth gating", () => {
     expect(state.initialize).toHaveBeenCalledTimes(1);
   });
 
-  it("does not fetch subjects without a token", () => {
-    mockAuth({ user: null, token: null });
+  it("does not fetch subjects without a session", () => {
+    mockAuth({ user: null, isAuthenticated: false });
 
     render(<DashboardPage />);
 

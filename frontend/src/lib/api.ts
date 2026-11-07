@@ -8,7 +8,14 @@ export interface User {
 }
 
 export interface AuthResponse {
+  /**
+   * B2: still returned by the API for non-browser clients, but the frontend
+   * deliberately does not read or store it. The session lives in an HttpOnly
+   * cookie that JavaScript cannot see. See `ApiClient.request`.
+   */
   access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
   token_type: string;
   user: User;
 }
@@ -605,30 +612,91 @@ export interface FlashcardTopicProgress {
   due_count: number;
 }
 
+// B2: the session is delivered in an HttpOnly cookie, so the page never holds a
+// credential. Three consequences, all handled here.
+//
+// 1. `credentials: "include"` -- the browser only attaches the cookie to a
+//    cross-origin request when asked to.
+// 2. A CSRF header on state-changing requests. The server refuses a
+//    cookie-authenticated write that does not echo the readable `csrf_token`
+//    cookie, because a cross-origin page can make the browser send the cookie
+//    but cannot read it or set a custom header.
+// 3. `Authorization` is no longer set at all. The old code read the token back
+//    out of localStorage on every call, which is exactly the exposure B2 removes.
+const CSRF_COOKIE = "csrf_token";
+const CSRF_HEADER = "X-CSRF-Token";
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+// A 401 from one of these is the answer, not an expired session, so they must
+// not trigger a refresh-and-retry that would mask the real error.
+const NO_REFRESH_PATHS = [
+  "/auth/login",
+  "/auth/login/form",
+  "/auth/register",
+  "/auth/refresh",
+  "/auth/change-password",
+];
+
+type UnauthorizedListener = () => void;
+let unauthorizedListener: UnauthorizedListener | null = null;
+
+/**
+ * Registers a callback invoked when the session turns out to be unrecoverable.
+ *
+ * The store uses this to drop the signed-in UI when a refresh token has expired
+ * or been revoked; without it a page would keep rendering a session the server
+ * no longer recognises.
+ */
+export function setUnauthorizedListener(listener: UnauthorizedListener | null): void {
+  unauthorizedListener = listener;
+}
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 class ApiClient {
-  private getToken(): string | null {
-    if (typeof window === "undefined") return null;
-    return localStorage.getItem("access_token");
+  // Shared across concurrent 401s so a dashboard that fires six requests at once
+  // triggers one refresh, not six. Six would rotate the refresh token six times
+  // and five of them would be rejected as replays.
+  private refreshInFlight: Promise<boolean> | null = null;
+
+  private csrfHeaders(method: string | undefined): Record<string, string> {
+    if (!method || !UNSAFE_METHODS.has(method.toUpperCase())) return {};
+    const token = readCookie(CSRF_COOKIE);
+    return token ? { [CSRF_HEADER]: token } : {};
   }
 
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const token = this.getToken();
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit = {},
+    isRetry = false
+  ): Promise<T> {
     const headers: Record<string, string> = {
       ...(options.headers as Record<string, string>),
+      ...this.csrfHeaders(options.method),
     };
 
     if (!(options.body instanceof FormData)) {
       headers["Content-Type"] = "application/json";
     }
 
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
       headers,
+      credentials: "include",
     });
+
+    if (response.status === 401 && !isRetry && !NO_REFRESH_PATHS.some((p) => endpoint.startsWith(p))) {
+      if (await this.refreshSession()) {
+        return this.request<T>(endpoint, options, true);
+      }
+      // The refresh token is gone or was revoked server-side, so this is not a
+      // transient failure: the session is over and the UI has to hear about it.
+      unauthorizedListener?.();
+    }
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ detail: "Request failed" }));
@@ -640,6 +708,33 @@ class ApiClient {
     }
 
     return response.json();
+  }
+
+  /**
+   * Trades the HttpOnly refresh cookie for a new pair, at most one attempt in
+   * flight. Resolves false rather than throwing: a failed refresh is an
+   * expected outcome, not an error the caller needs to distinguish.
+   */
+  private async refreshSession(): Promise<boolean> {
+    if (!this.refreshInFlight) {
+      this.refreshInFlight = (async () => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+            method: "POST",
+            headers: { ...this.csrfHeaders("POST") },
+            credentials: "include",
+          });
+          return response.ok;
+        } catch {
+          // Offline or the API is down. Treated the same as a rejected
+          // refresh: the caller surfaces the original 401.
+          return false;
+        } finally {
+          this.refreshInFlight = null;
+        }
+      })();
+    }
+    return this.refreshInFlight;
   }
 
   // Auth Endpoints
@@ -655,6 +750,16 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  }
+
+  async logout(): Promise<void> {
+    // Best effort: the local session is cleared either way, and a logout that
+    // fails to reach the server still leaves the cookies to expire on their own.
+    try {
+      await this.request<Record<string, never>>("/auth/logout", { method: "POST" });
+    } catch {
+      // Intentionally ignored.
+    }
   }
 
   async getMe(): Promise<User> {

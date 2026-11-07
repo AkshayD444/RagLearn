@@ -28,7 +28,7 @@ import {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, token, initialize, logout, isLoading: authLoading } = useAuthStore();
+  const { user, isAuthenticated, initialize, logout, isLoading: authLoading } = useAuthStore();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isFetchingSubjects, setIsFetchingSubjects] = useState(false);
@@ -39,13 +39,13 @@ export default function DashboardPage() {
   }, [initialize]);
 
   useEffect(() => {
-    if (token) {
+    if (isAuthenticated) {
       fetchSubjects();
     }
-  }, [token]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!isAuthenticated) return;
     let active = true;
     api
       .getAnalyticsOverview()
@@ -60,7 +60,7 @@ export default function DashboardPage() {
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [isAuthenticated]);
 
   const fetchSubjects = async () => {
     setIsFetchingSubjects(true);
@@ -100,7 +100,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (!token || !user) {
+  if (!isAuthenticated || !user) {
     return (
       <main className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
         <AuthModal />

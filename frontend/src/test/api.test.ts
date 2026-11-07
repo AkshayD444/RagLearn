@@ -47,6 +47,10 @@ beforeEach(() => {
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
   window.localStorage.clear();
+  document.cookie.split(";").forEach((c) => {
+    const name = c.split("=")[0].trim();
+    if (name) document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+  });
 });
 
 afterEach(() => {
@@ -70,21 +74,51 @@ describe("api request plumbing", () => {
     expect(lastCall()[0]).toBe(`${BASE}/subjects`);
   });
 
-  it("sends the stored access token as a bearer header", async () => {
-    window.localStorage.setItem("access_token", "jwt-token-value");
+  it("sends cookies with every request instead of an Authorization header", async () => {
     fetchMock.mockResolvedValue(jsonResponse([]));
 
     await api.getSubjects();
 
-    expect(headersOf(lastCall()[1]).Authorization).toBe("Bearer jwt-token-value");
+    const [, call] = lastCall();
+    // The whole point of B2: the credential rides in a cookie the browser
+    // attaches, so nothing in the page has to hold it.
+    expect(call.credentials).toBe("include");
+    expect(headersOf(call).Authorization).toBeUndefined();
   });
 
-  it("omits the Authorization header when there is no token", async () => {
+  it("never reads the session out of localStorage", async () => {
+    window.localStorage.setItem("access_token", "leftover-from-an-old-build");
     fetchMock.mockResolvedValue(jsonResponse([]));
 
     await api.getSubjects();
 
     expect(headersOf(lastCall()[1]).Authorization).toBeUndefined();
+    expect(window.localStorage.getItem("access_token")).toBe("leftover-from-an-old-build");
+  });
+
+  it("echoes the CSRF cookie into a header on writes", async () => {
+    document.cookie = "csrf_token=csrf-value-123";
+    fetchMock.mockResolvedValue(jsonResponse({ id: "1" }));
+
+    await api.createSubject({ title: "Physics" });
+
+    expect(headersOf(lastCall()[1])["X-CSRF-Token"]).toBe("csrf-value-123");
+  });
+
+  it("does not send a CSRF header on safe requests", async () => {
+    document.cookie = "csrf_token=csrf-value-123";
+    fetchMock.mockResolvedValue(jsonResponse([]));
+
+    await api.getSubjects();
+
+    expect(headersOf(lastCall()[1])["X-CSRF-Token"]).toBeUndefined();
+  });
+
+  it("surfaces the server's CSRF rejection rather than retrying it", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ detail: "CSRF token missing or invalid." }, 403));
+
+    await expect(api.createSubject({ title: "Physics" })).rejects.toThrow("CSRF token");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("sets a JSON content type for plain-object bodies", async () => {
@@ -584,5 +618,100 @@ describe("api next-learning endpoints", () => {
     await api.getSubjectNextLearning("subject-1");
 
     expect(lastCall()[0]).toBe(`${BASE}/recommendations/subjects/subject-1/next`);
+  });
+});
+
+/**
+ * B1/B2: the access token is short-lived, so a session is expected to outlive
+ * it. These cover the silent refresh that keeps a signed-in student signed in
+ * without the page ever holding a credential.
+ */
+describe("api session refresh", () => {
+  function queued(...responses: Response[]) {
+    responses.forEach((r) => fetchMock.mockResolvedValueOnce(r));
+  }
+
+  it("refreshes once and replays the original request after a 401", async () => {
+    queued(
+      jsonResponse({ detail: "Could not validate credentials" }, 401),
+      jsonResponse({ access_token: "new" }),
+      jsonResponse([{ id: "1" }]),
+    );
+
+    const result = await api.getSubjects();
+
+    expect(result).toEqual([{ id: "1" }]);
+    expect(fetchMock.mock.calls[1][0]).toBe(`${BASE}/auth/refresh`);
+    expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBe("POST");
+  });
+
+  it("only refreshes once, no matter how many requests fail together", async () => {
+    // The dashboard fires several requests at once. Each rotating the refresh
+    // token would invalidate the others.
+    queued(
+      jsonResponse({ detail: "no" }, 401),
+      jsonResponse({ detail: "no" }, 401),
+      jsonResponse({ detail: "no" }, 401),
+      jsonResponse({ access_token: "new" }),
+      jsonResponse([{ id: "1" }]),
+      jsonResponse([{ id: "2" }]),
+      jsonResponse([{ id: "3" }]),
+    );
+
+    await Promise.all([api.getSubjects(), api.getSubjects(), api.getSubjects()]);
+
+    const refreshCalls = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/auth/refresh"));
+    expect(refreshCalls).toHaveLength(1);
+  });
+
+  it("surfaces the original error when the refresh is rejected", async () => {
+    // A rejected refresh means the session is genuinely over, not a blip.
+    queued(
+      jsonResponse({ detail: "Could not validate credentials" }, 401),
+      jsonResponse({ detail: "Invalid or expired refresh token" }, 401),
+    );
+
+    await expect(api.getSubjects()).rejects.toThrow("Could not validate credentials");
+  });
+
+  it("does not try to refresh a failed sign-in", async () => {
+    // A 401 from /auth/login *is* the answer. Refreshing would turn "wrong
+    // password" into a confusing second failure.
+    queued(jsonResponse({ detail: "Incorrect email or password" }, 401));
+
+    await expect(api.login({ email: "a@b.com", password: "nope" })).rejects.toThrow(
+      "Incorrect email or password",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not loop when the retried request is rejected again", async () => {
+    queued(
+      jsonResponse({ detail: "no" }, 401),
+      jsonResponse({ access_token: "new" }),
+      jsonResponse({ detail: "still no" }, 401),
+    );
+
+    await expect(api.getSubjects()).rejects.toThrow("still no");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("api logout", () => {
+  it("posts to the logout endpoint with cookies attached", async () => {
+    fetchMock.mockResolvedValue(emptyResponse(204));
+
+    await api.logout();
+
+    const [url, call] = lastCall();
+    expect(url).toBe(`${BASE}/auth/logout`);
+    expect(call.method).toBe("POST");
+    expect(call.credentials).toBe("include");
+  });
+
+  it("swallows the failure so the caller can still sign out locally", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ detail: "boom" }, 500));
+
+    await expect(api.logout()).resolves.toBeUndefined();
   });
 });

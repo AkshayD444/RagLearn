@@ -5,15 +5,23 @@ vi.mock("@/lib/api", () => ({
     getMe: vi.fn(),
     login: vi.fn(),
     register: vi.fn(),
+    logout: vi.fn(),
   },
+  setUnauthorizedListener: vi.fn(),
 }));
 
-import { api } from "@/lib/api";
+import { api, setUnauthorizedListener } from "@/lib/api";
 import { useAuthStore } from "@/store/useAuthStore";
+
+// Captured at module scope on purpose. The store registers its listener when it
+// is imported, which happens before any beforeEach reset -- reading it inside a
+// test would find the mock already cleared.
+const registeredListener = vi.mocked(setUnauthorizedListener).mock.calls[0]?.[0];
 
 const getMe = vi.mocked(api.getMe);
 const login = vi.mocked(api.login);
 const register = vi.mocked(api.register);
+const logout = vi.mocked(api.logout);
 
 const user = {
   id: "22222222-2222-4222-8222-222222222222",
@@ -24,76 +32,112 @@ const user = {
 
 const auth = {
   access_token: "jwt-token-value",
+  refresh_token: "refresh-token-value",
+  expires_in: 900,
   token_type: "bearer",
   user,
 };
 
 function resetStore() {
-  useAuthStore.setState({ user: null, token: null, isLoading: false, error: null });
+  useAuthStore.setState({
+    user: null,
+    isAuthenticated: false,
+    isLoading: false,
+    error: null,
+  });
 }
 
 beforeEach(() => {
+  // B2: the store must not depend on anything left in web storage, so these
+  // tests clear it and then assert it stays clear.
   window.localStorage.clear();
+  document.cookie.split(";").forEach((c) => {
+    const name = c.split("=")[0].trim();
+    if (name) document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+  });
   resetStore();
   getMe.mockReset();
   login.mockReset();
   register.mockReset();
+  logout.mockReset();
+  logout.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
   resetStore();
 });
 
-describe("useAuthStore.initialize", () => {
-  it("does nothing when no token is stored", async () => {
+describe("B2: nothing is persisted in web storage", () => {
+  it("never writes a token to localStorage, even after signing in", async () => {
+    login.mockResolvedValue(auth);
+
+    await useAuthStore.getState().login({ email: user.email, password: "password123" });
+
+    expect(window.localStorage.getItem("access_token")).toBeNull();
+    expect(window.localStorage.length).toBe(0);
+    expect(window.localStorage.getItem("refresh_token")).toBeNull();
+  });
+
+  it("keeps no token in its own state either", async () => {
+    login.mockResolvedValue(auth);
+
+    await useAuthStore.getState().login({ email: user.email, password: "password123" });
+
+    const state = useAuthStore.getState();
+    expect(JSON.stringify(state)).not.toContain(auth.access_token);
+    expect(JSON.stringify(state)).not.toContain(auth.refresh_token);
+    expect(state.isAuthenticated).toBe(true);
+  });
+
+  it("does not read a previously stored token on startup", async () => {
+    window.localStorage.setItem("access_token", "leftover-from-an-old-build");
+    getMe.mockRejectedValue(new Error("Not authenticated"));
+
     await useAuthStore.getState().initialize();
 
-    expect(getMe).not.toHaveBeenCalled();
+    // A stale value from a previous build must not be able to re-establish a
+    // session; the server is the only authority on whether one exists.
+    expect(getMe).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+  });
+});
+
+describe("useAuthStore.initialize", () => {
+  it("settles as signed out when there is no session", async () => {
+    getMe.mockRejectedValue(new Error("Not authenticated"));
+
+    await useAuthStore.getState().initialize();
+
     expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(useAuthStore.getState().isLoading).toBe(false);
   });
 
-  it("hydrates the user from a stored token", async () => {
-    window.localStorage.setItem("access_token", "jwt-token-value");
+  it("hydrates the user from the session cookie", async () => {
     getMe.mockResolvedValue(user);
 
     await useAuthStore.getState().initialize();
 
     expect(getMe).toHaveBeenCalledTimes(1);
     expect(useAuthStore.getState().user).toEqual(user);
-    expect(useAuthStore.getState().token).toBe("jwt-token-value");
+    expect(useAuthStore.getState().isAuthenticated).toBe(true);
     expect(useAuthStore.getState().isLoading).toBe(false);
   });
 
-  it("clears an expired token when the session lookup fails", async () => {
-    window.localStorage.setItem("access_token", "stale-token");
+  it("settles out of the loading state even when the lookup fails", async () => {
+    useAuthStore.setState({ isLoading: true });
     getMe.mockRejectedValue(new Error("Not authenticated"));
 
     await useAuthStore.getState().initialize();
 
-    expect(window.localStorage.getItem("access_token")).toBeNull();
-    expect(useAuthStore.getState().user).toBeNull();
-    expect(useAuthStore.getState().token).toBeNull();
     expect(useAuthStore.getState().isLoading).toBe(false);
-  });
-
-  it("settles out of the loading state even when no token is stored", async () => {
-    // A caller that awaits initialize() needs "settled" to mean the same thing
-    // whether or not a token existed, so this cannot depend on the initial
-    // state being correct.
-    useAuthStore.setState({ isLoading: true, token: "stale-in-memory" });
-
-    await useAuthStore.getState().initialize();
-
-    expect(useAuthStore.getState().isLoading).toBe(false);
-    expect(useAuthStore.getState().token).toBeNull();
-    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 
   it("keeps a session that was established while the lookup was in flight", async () => {
-    window.localStorage.setItem("access_token", "stale-token");
     // The student signs in with a different account before /me settles, so the
-    // stored token has moved on by the time the stale request fails.
+    // stale request must not sign them back out.
+    login.mockResolvedValue(auth);
     let rejectLookup: (err: Error) => void = () => {};
     getMe.mockImplementation(
       () =>
@@ -103,27 +147,24 @@ describe("useAuthStore.initialize", () => {
     );
 
     const initializing = useAuthStore.getState().initialize();
-    window.localStorage.setItem("access_token", "fresh-token");
-    useAuthStore.setState({ token: "fresh-token", user });
+    await useAuthStore.getState().login({ email: "other@example.com", password: "password123" });
     rejectLookup(new Error("Not authenticated"));
     await initializing;
 
-    expect(window.localStorage.getItem("access_token")).toBe("fresh-token");
-    expect(useAuthStore.getState().token).toBe("fresh-token");
+    expect(useAuthStore.getState().isAuthenticated).toBe(true);
     expect(useAuthStore.getState().user).toEqual(user);
   });
 });
 
 describe("useAuthStore.login", () => {
-  it("persists the token and user on success", async () => {
+  it("records the user and marks the session active", async () => {
     login.mockResolvedValue(auth);
 
     await useAuthStore.getState().login({ email: user.email, password: "password123" });
 
     expect(login).toHaveBeenCalledWith({ email: user.email, password: "password123" });
-    expect(window.localStorage.getItem("access_token")).toBe("jwt-token-value");
     expect(useAuthStore.getState().user).toEqual(user);
-    expect(useAuthStore.getState().token).toBe("jwt-token-value");
+    expect(useAuthStore.getState().isAuthenticated).toBe(true);
     expect(useAuthStore.getState().error).toBeNull();
     expect(useAuthStore.getState().isLoading).toBe(false);
   });
@@ -137,20 +178,21 @@ describe("useAuthStore.login", () => {
 
     expect(useAuthStore.getState().error).toBe("Incorrect email or password");
     expect(useAuthStore.getState().isLoading).toBe(false);
-    expect(window.localStorage.getItem("access_token")).toBeNull();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 });
 
 describe("useAuthStore.register", () => {
-  it("persists the token and user on success", async () => {
+  it("records the user and marks the session active", async () => {
     register.mockResolvedValue(auth);
 
     await useAuthStore
       .getState()
       .register({ email: user.email, full_name: user.full_name, password: "password123" });
 
-    expect(window.localStorage.getItem("access_token")).toBe("jwt-token-value");
     expect(useAuthStore.getState().user).toEqual(user);
+    expect(useAuthStore.getState().isAuthenticated).toBe(true);
+    expect(window.localStorage.length).toBe(0);
   });
 
   it("surfaces a duplicate-email error", async () => {
@@ -163,31 +205,58 @@ describe("useAuthStore.register", () => {
     ).rejects.toThrow("Email already registered");
 
     expect(useAuthStore.getState().error).toBe("Email already registered");
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 });
 
 describe("useAuthStore.logout", () => {
-  it("removes the token and clears the session", () => {
-    window.localStorage.setItem("access_token", "jwt-token-value");
-    useAuthStore.setState({ user, token: "jwt-token-value", error: "stale" });
+  it("asks the server to end the session, then clears local state", async () => {
+    useAuthStore.setState({ user, isAuthenticated: true, error: "stale" });
 
-    useAuthStore.getState().logout();
+    await useAuthStore.getState().logout();
 
-    expect(window.localStorage.getItem("access_token")).toBeNull();
+    // Revocation is the point: without the call, signing out would only forget
+    // the session rather than ending it.
+    expect(logout).toHaveBeenCalledTimes(1);
     expect(useAuthStore.getState().user).toBeNull();
-    expect(useAuthStore.getState().token).toBeNull();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
     expect(useAuthStore.getState().error).toBeNull();
+  });
+
+  it("clears local state even when the server cannot be reached", async () => {
+    logout.mockRejectedValue(new Error("Network down"));
+    useAuthStore.setState({ user, isAuthenticated: true });
+
+    await useAuthStore.getState().logout();
+
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 });
 
 describe("useAuthStore.clearError", () => {
   it("clears the error without touching the session", () => {
-    useAuthStore.setState({ user, token: "jwt-token-value", error: "boom" });
+    useAuthStore.setState({ user, isAuthenticated: true, error: "boom" });
 
     useAuthStore.getState().clearError();
 
     expect(useAuthStore.getState().error).toBeNull();
     expect(useAuthStore.getState().user).toEqual(user);
-    expect(useAuthStore.getState().token).toBe("jwt-token-value");
+    expect(useAuthStore.getState().isAuthenticated).toBe(true);
+  });
+});
+
+describe("unrecoverable sessions", () => {
+  it("subscribes the store to the api client's unauthorized signal", () => {
+    expect(typeof registeredListener).toBe("function");
+  });
+
+  it("drops the signed-in state when the session is withdrawn server-side", () => {
+    useAuthStore.setState({ user, isAuthenticated: true });
+
+    registeredListener!();
+
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 });
