@@ -621,7 +621,7 @@ async def test_next_learning_is_deterministic():
 
 
 @pytest.mark.asyncio
-async def test_next_learning_subject_scoped_is_owned_only():
+async def test_next_learning_subject_scoped_is_owned_only(forget_session):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         token, _ = await _register(ac, "next_owner@example.com")
         intruder_token, _ = await _register(ac, "next_intruder@example.com")
@@ -631,6 +631,7 @@ async def test_next_learning_subject_scoped_is_owned_only():
             res = await _next(ac, intruder_token, bad)
             assert res.status_code == 404
 
+        forget_session(ac)
         unauthenticated = await ac.get(
             f"/api/v1/recommendations/subjects/{subject_id}/next"
         )

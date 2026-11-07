@@ -103,7 +103,9 @@ async def test_patch_ignores_unknown_fields(client, registered_user, subject):
 
 
 @pytest.mark.asyncio
-async def test_patch_is_owner_scoped(client, registered_user, other_user, subject):
+async def test_patch_is_owner_scoped(
+    client, registered_user, other_user, subject, forget_session
+):
     denied = await client.patch(
         f"/api/v1/subjects/{subject}",
         json={"title": "Hijacked"},
@@ -111,6 +113,7 @@ async def test_patch_is_owner_scoped(client, registered_user, other_user, subjec
     )
     assert denied.status_code == 404
 
+    forget_session(client)
     anonymous = await client.patch(
         f"/api/v1/subjects/{subject}", json={"title": "Anonymous"}
     )

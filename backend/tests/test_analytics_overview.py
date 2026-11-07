@@ -341,7 +341,9 @@ async def test_overview_scopes_to_one_subject(client, registered_user, subject):
 
 
 @pytest.mark.asyncio
-async def test_overview_is_owner_scoped(client, registered_user, other_user, subject):
+async def test_overview_is_owner_scoped(
+    client, registered_user, other_user, subject, forget_session
+):
     quiz_id = await _seed_quiz(registered_user["user_id"], subject, "Private Quiz")
     await _seed_attempt(
         registered_user["user_id"],
@@ -367,6 +369,7 @@ async def test_overview_is_owner_scoped(client, registered_user, other_user, sub
     )
     assert foreign_subject.status_code == 404
 
+    forget_session(client)
     anonymous = await client.get("/api/v1/analytics/overview")
     assert anonymous.status_code == 401
 

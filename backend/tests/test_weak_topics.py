@@ -424,7 +424,7 @@ async def test_weak_topics_honours_the_limit_and_rejects_invalid_values():
 
 
 @pytest.mark.asyncio
-async def test_weak_topics_and_mastery_are_scoped_to_the_owning_user():
+async def test_weak_topics_and_mastery_are_scoped_to_the_owning_user(forget_session):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         owner_token, owner_id = await _register(ac, "weak_owner@example.com")
         intruder_token, _ = await _register(ac, "weak_intruder@example.com")
@@ -440,6 +440,7 @@ async def test_weak_topics_and_mastery_are_scoped_to_the_owning_user():
             unknown = await call(ac, owner_token, str(uuid.uuid4()))
             assert unknown.status_code == 404
 
+            forget_session(ac)
             unauthenticated = await ac.get(
                 f"/api/v1/analytics/subjects/{subject_id}/weak-topics"
             )
