@@ -53,7 +53,7 @@ ALEMBIC_INI = BACKEND_ROOT / "alembic.ini"
 BASELINE_REVISION = "0001_initial_schema"
 
 # Only used if the migration history itself cannot be read; see `_head_revision`.
-_FALLBACK_HEAD = "0002_flashcard_scheduling"
+_FALLBACK_HEAD = "0003_token_lifecycle"
 
 
 class SchemaOutOfDateError(RuntimeError):

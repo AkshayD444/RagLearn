@@ -34,7 +34,12 @@ assert models.__all__, "app.models must export every ORM model for autogenerate"
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers=False` is load-bearing. The default is True,
+    # which sets `.disabled` on every logger that already exists -- and because
+    # the line above imports the app, that includes the whole `app.*` tree. The
+    # application then cannot log anything, and in-process migration runs (the
+    # test suite does this) silently mute logging for whatever runs next.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 _x_args = context.get_x_argument(as_dictionary=True)
 _overridden_url = _x_args.get("db_url")

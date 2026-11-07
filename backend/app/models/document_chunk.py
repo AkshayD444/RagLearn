@@ -32,7 +32,8 @@ class DocumentChunk(Base):
     page_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     
-    # 768-dimensional Vector embedding for Google Gemini text-embedding-004
+    # 768-dimensional Vector embedding for Google Gemini gemini-embedding-2
+    # (truncated from 3072 via MRL; see app/rag/embeddings.py)
     embedding: Mapped[Optional[list]] = mapped_column(Vector(768), nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(

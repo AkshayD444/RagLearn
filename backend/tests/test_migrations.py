@@ -34,7 +34,7 @@ from app.core.schema import (
     ensure_schema,
 )
 
-HEAD = "0002_flashcard_scheduling"
+HEAD = "0003_token_lifecycle"
 BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

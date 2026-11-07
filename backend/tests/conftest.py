@@ -16,7 +16,22 @@ import os
 # --- Offline / isolation hardening. Must run before importing app modules ---
 # An explicit empty value takes precedence over any value in backend/.env.
 os.environ["GEMINI_API_KEY"] = ""
+# B1: deterministic embeddings are opt-in, so the suite opts in explicitly here
+# rather than relying on a production fallback that silently returns hash-derived
+# noise. Set before any app import so every GeminiEmbeddingService built anywhere
+# in the suite resolves in offline mode. Tests that assert the fail-closed
+# behaviour construct a service with this forced back off, and
+# tests/test_embedding_failures.py covers both halves.
+os.environ["EMBEDDINGS_ALLOW_DETERMINISTIC_FALLBACK"] = "True"
 os.environ.setdefault("ENVIRONMENT", "test")
+# A1 removed the default JWT signing key, so one must be supplied for the suite
+# to be able to import app.core.config at all. This is a throwaway value that
+# only ever signs tokens inside a test process: the production guard rejects
+# anything that short, and no test asserts behaviour that depends on this
+# particular string.
+os.environ.setdefault(
+    "SECRET_KEY", "test-only-signing-key-not-used-outside-the-test-suite-0123456789"
+)
 # Point the application's global engine at throwaway SQLite so an accidental
 # query can never reach a real PostgreSQL instance.
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
@@ -24,8 +39,9 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
 import contextlib
 import socket
 import uuid
-from typing import AsyncIterator, Iterator
+from typing import AsyncIterator, Callable, Iterator
 
+import httpx
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -35,6 +51,7 @@ from sqlalchemy.pool import NullPool
 from unittest.mock import patch
 
 import app.rag.document_processor as doc_proc
+from app.core.auth_cookies import CSRF_HEADER
 from app.core.database import Base
 from app.api.deps import get_db
 from app.main import app
@@ -88,6 +105,13 @@ def requires_postgres(url: str) -> None:
         )
 
 
+# B5: fixtures that hand a test a live PostgreSQL connection. A test that asks
+# for one of these is expected to open a socket to the server -- the migration
+# tests drive the real Alembic runner against a throwaway database -- so both
+# the outbound-network guard and the SQLite schema fixture have to stand aside.
+POSTGRES_FIXTURES = frozenset({"pg_engine", "pg_migration_database"})
+
+
 def auth_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
@@ -104,6 +128,13 @@ def _offline_ai_services():
     Production behaviour is untouched: this only flips the resolved key and the
     ``api_key_configured`` flags that the module-level singletons captured when
     they were constructed at import time.
+
+    B1: the embedding singleton needs two flags flipped, not one. ``
+    api_key_configured = False`` stops it reaching the API, and
+    ``allow_deterministic_fallback = True`` is the explicit opt-in that lets it
+    return a hash-derived vector rather than raising. Tests that assert the
+    production fail-closed behaviour set the second back to False on their own
+    instance, so the two paths are exercised independently.
     """
     from app.core.config import settings
 
@@ -112,14 +143,24 @@ def _offline_ai_services():
         quiz_generation_service.api_key_configured,
         rag_tutor_service.api_key_configured,
     )
+    original_embedding_flags = (
+        embedding_service.api_key_configured,
+        embedding_service.allow_deterministic_fallback,
+    )
     settings.GEMINI_API_KEY = ""
     quiz_generation_service.api_key_configured = False
     rag_tutor_service.api_key_configured = False
+    embedding_service.api_key_configured = False
+    embedding_service.allow_deterministic_fallback = True
     try:
         yield
     finally:
         settings.GEMINI_API_KEY = original_key
         quiz_generation_service.api_key_configured, rag_tutor_service.api_key_configured = original_flags
+        (
+            embedding_service.api_key_configured,
+            embedding_service.allow_deterministic_fallback,
+        ) = original_embedding_flags
 
 
 class _BlockedNetworkCall(RuntimeError):
@@ -156,7 +197,7 @@ def _no_outbound_network(request: pytest.FixtureRequest) -> Iterator[None]:
     The PostgreSQL/pgvector integration tests are exempt because they must talk
     to a real database over the loopback interface.
     """
-    if "pg_engine" in request.fixturenames:
+    if POSTGRES_FIXTURES & set(request.fixturenames):
         yield
         return
 
@@ -187,6 +228,24 @@ def _no_outbound_network(request: pytest.FixtureRequest) -> Iterator[None]:
         yield
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter() -> Iterator[None]:
+    """Clears rate-limit counters around every test.
+
+    A4: the limiter is process-wide and keyed by client address, and httpx's
+    ASGI transport reports the same ``testclient`` peer for every request. Left
+    alone, one test's login attempts would throttle a later, unrelated test and
+    the suite would fail for a reason that has nothing to do with the code under
+    test. Resetting between tests keeps each one independent while the limiter
+    itself is still exercised -- see tests/test_rate_limit.py.
+    """
+    from app.core.rate_limit import limiter
+
+    limiter.reset()
+    yield
+    limiter.reset()
+
+
 # ---------------------------------------------------------------------------
 # Core fixtures
 # ---------------------------------------------------------------------------
@@ -196,10 +255,10 @@ def _no_outbound_network(request: pytest.FixtureRequest) -> Iterator[None]:
 async def setup_test_db(request: pytest.FixtureRequest):
     """Creates a fresh schema before every test and drops it afterwards.
 
-    Opting into the ``pg_engine`` fixture hands schema lifecycle over to the
-    PostgreSQL engine, so the SQLite work is skipped in that case.
+    Opting into a ``POSTGRES_FIXTURES`` fixture hands schema lifecycle over to
+    the PostgreSQL engine, so the SQLite work is skipped in that case.
     """
-    if "pg_engine" in request.fixturenames:
+    if POSTGRES_FIXTURES & set(request.fixturenames):
         yield
         return
 
@@ -284,11 +343,99 @@ async def pg_engine() -> AsyncIterator:
             await engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+def _emulate_browser_csrf(monkeypatch) -> Iterator[None]:
+    """Makes every test client behave like a browser page on a cookie session.
+
+    B2 moved the access token into an HttpOnly cookie, and a cookie is attached
+    by the browser to any request -- including one another site can trigger. The
+    server therefore requires a matching CSRF header on cookie-authenticated
+    writes. A real page satisfies that by echoing the ``csrf_token`` cookie into
+    a header, and httpx has no equivalent, so this hook does it for every client
+    the suite builds.
+
+    The point is to keep the existing tests measuring routes and ownership
+    rather than the transport. It deliberately does *not* stand in for the
+    security check: the 403 is asserted directly in
+    tests/test_auth_lifecycle.py, and the hook steps aside for any request that
+    already carries an Authorization header.
+    """
+    original_init = httpx.AsyncClient.__init__
+
+    def patched_init(self, *args, **kwargs) -> None:
+        original_init(self, *args, **kwargs)
+        self.event_hooks["request"].append(_csrf_hook_for(self))
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+    yield
+
+
+def _csrf_hook_for(client: AsyncClient) -> Callable[[httpx.Request], None]:
+    # httpx awaits the result of every request hook, so this must be async even
+    # though it only mutates headers.
+    async def _attach_csrf_header(request: httpx.Request) -> None:
+        if request.method.upper() not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return
+        if "Authorization" in request.headers:
+            return
+        if CSRF_HEADER in request.headers:
+            # The test is deliberately sending its own -- possibly wrong -- value,
+            # which is how the rejection path is reached.
+            return
+        token = client.cookies.get("csrf_token")
+        if token:
+            request.headers[CSRF_HEADER] = token
+
+    return _attach_csrf_header
+
+
+@pytest_asyncio.fixture
+async def db_session() -> AsyncIterator[AsyncSession]:
+    """A session on the active test database, for asserting about stored rows.
+
+    B1 moved part of the session state server-side -- the account's
+    ``token_version`` and the refresh token digests -- so some of its guarantees
+    are only observable by reading the rows, not by reading an HTTP response.
+    """
+    async with TestAsyncSessionLocal() as session:
+        yield session
+
+
 @pytest_asyncio.fixture
 async def client() -> AsyncIterator[AsyncClient]:
-    """Unauthenticated ASGI client bound to the test app."""
+    """ASGI client bound to the test app."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
+
+
+@pytest_asyncio.fixture
+async def anonymous_client() -> AsyncIterator[AsyncClient]:
+    """A client with no credentials and an empty cookie jar.
+
+    B2 moved authentication from a header the caller had to choose to send to a
+    cookie the browser attaches by itself, so the shared ``client`` is signed in
+    from the moment it registers. Asserting that a route rejects an anonymous
+    caller needs a second, virgin client: reusing the shared one would leave
+    those assertions passing for the wrong reason.
+    """
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.fixture
+def forget_session() -> Callable[[AsyncClient], None]:
+    """Strips a client back to an anonymous caller mid-test.
+
+    Several tests interleave authenticated and anonymous calls on one client.
+    Clearing the jar says "act as though no one is signed in" in a way the
+    server can actually observe, which is not something the old header-based
+    scheme needed.
+    """
+
+    def _forget(ac: AsyncClient) -> None:
+        ac.cookies.clear()
+
+    return _forget
 
 
 @pytest_asyncio.fixture
