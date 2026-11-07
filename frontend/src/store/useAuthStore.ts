@@ -36,7 +36,7 @@ let sessionGeneration = 0;
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
-  isLoading: false,
+  isLoading: true,
   error: null,
 
   initialize: async () => {

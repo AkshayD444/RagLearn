@@ -71,6 +71,7 @@ export default function SubjectDetailPage() {
     if (isAuthenticated && subjectId) {
       fetchSubjectData();
     } else if (!isAuthenticated) {
+      router.push("/login");
       setIsLoading(false);
     }
   }, [isAuthenticated, subjectId]);
