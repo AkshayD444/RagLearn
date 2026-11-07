@@ -5,6 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user
+from app.core.rate_limit import GENERATIVE_POLICY, rate_limit
+
 from app.models.subject import Subject
 from app.models.user import User
 from app.rag.qa import rag_tutor_service
@@ -17,6 +19,10 @@ from app.schemas.rag import (
     RetrievalResponse,
     RetrievedChunk,
 )
+
+# A4: /retrieve and /ask both spend Gemini credits, so each is throttled per
+# authenticated user. See app/core/rate_limit.py.
+limit_generative = rate_limit(GENERATIVE_POLICY, user_dependency=get_current_user)
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
 
@@ -46,6 +52,7 @@ async def retrieve_context(
     payload: RetrievalRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rate_limited: None = Depends(limit_generative),
 ) -> Any:
     """Semantically retrieves the most relevant indexed chunks for a user's subject."""
     await _require_owned_subject(db, payload.subject_id, current_user)
@@ -70,6 +77,7 @@ async def ask_rag_tutor(
     payload: RagQuestion,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rate_limited: None = Depends(limit_generative),
 ) -> Any:
     """Answers a question grounded in the user's study materials with citations."""
     await _require_owned_subject(db, payload.subject_id, current_user)

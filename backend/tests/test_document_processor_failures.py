@@ -318,7 +318,10 @@ async def test_upload_to_another_users_subject_is_rejected_before_processing(
 
 
 @pytest.mark.asyncio
-async def test_document_upload_requires_authentication(client, subject):
+async def test_document_upload_requires_authentication(client, subject, forget_session):
+    # B2: the shared client is authenticated by cookie; drop it to make this an
+    # anonymous request again.
+    forget_session(client)
     files = {"file": ("notes.pdf", io.BytesIO(_text_pdf_bytes()), "application/pdf")}
     res = await client.post(
         "/api/v1/documents/upload",

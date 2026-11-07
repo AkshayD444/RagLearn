@@ -204,7 +204,7 @@ async def test_rag_subject_without_indexed_material():
 
 
 @pytest.mark.asyncio
-async def test_rag_validation_and_auth_errors():
+async def test_rag_validation_and_auth_errors(forget_session):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         token, user_id = await _register(ac, "rag_validate@example.com")
         subject_id = await _create_subject(ac, token, "Validation Subject")
@@ -212,7 +212,10 @@ async def test_rag_validation_and_auth_errors():
 
         headers = _auth(token)
 
-        # 401 without a token
+        # 401 without a token. B2: clear the cookie jar first -- the session
+        # cookie authenticates just as well as the header, so the request has
+        # to genuinely carry nothing.
+        forget_session(ac)
         no_token = await ac.post(
             "/api/v1/rag/retrieve", json={"subject_id": subject_id, "query": "x"}
         )

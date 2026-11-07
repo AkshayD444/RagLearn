@@ -181,7 +181,9 @@ async def test_status_surfaces_the_failure_reason(client, registered_user, subje
 
 
 @pytest.mark.asyncio
-async def test_status_is_owner_scoped(client, registered_user, other_user, seeded_chunks):
+async def test_status_is_owner_scoped(
+    client, registered_user, other_user, subject, seeded_chunks, forget_session
+):
     document_id, _ = await seeded_chunks(["Private material."], title="Private.pdf")
 
     denied = await client.get(
@@ -189,6 +191,7 @@ async def test_status_is_owner_scoped(client, registered_user, other_user, seede
     )
     assert denied.status_code == 404
 
+    forget_session(client)
     anonymous = await client.get(f"/api/v1/documents/{document_id}/status")
     assert anonymous.status_code == 401
 
@@ -309,7 +312,9 @@ async def test_reprocess_reports_a_missing_file_instead_of_a_silent_failure(
 
 
 @pytest.mark.asyncio
-async def test_reprocess_is_owner_scoped(client, registered_user, other_user, seeded_chunks):
+async def test_reprocess_is_owner_scoped(
+    client, registered_user, other_user, subject, seeded_chunks, forget_session
+):
     document_id, chunk_ids = await seeded_chunks(
         ["Private material."], title="Private.pdf"
     )
@@ -323,6 +328,7 @@ async def test_reprocess_is_owner_scoped(client, registered_user, other_user, se
     )
     assert denied.status_code == 404
 
+    forget_session(client)
     anonymous = await client.post(f"/api/v1/documents/{document_id}/reprocess")
     assert anonymous.status_code == 401
 

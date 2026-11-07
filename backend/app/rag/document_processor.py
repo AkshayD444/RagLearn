@@ -96,8 +96,21 @@ async def process_document_file(
                 raise ValueError("Document yielded 0 text chunks after processing.")
 
             # 3. Generate Embeddings
+            # B1: this raises rather than substituting a hash-derived vector
+            # when Gemini is unconfigured or failing (see app/rag/embeddings.py),
+            # and the batch is all-or-nothing, so a failure here lands on the
+            # handler below and the document is recorded as FAILED. The
+            # `status = "READY"` assignment further down is therefore reachable
+            # only with a full set of real, correctly-sized vectors behind it --
+            # which is the point: a document that indexed noise is worse than one
+            # that visibly failed, because READY looks like it worked.
             chunk_contents = [c["content"] for c in chunks]
             vectors = await embedding_service.get_embeddings_batch(chunk_contents)
+            if len(vectors) != len(chunks):
+                raise ValueError(
+                    f"Embedding service returned {len(vectors)} vectors for "
+                    f"{len(chunks)} chunks; refusing to index a partial result."
+                )
 
             # 4. Store Chunks in DB
             for chunk_data, vector in zip(chunks, vectors):

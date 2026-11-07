@@ -3,16 +3,24 @@ import os
 import shutil
 from typing import List, Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks, Response
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user
+from app.core.rate_limit import UPLOAD_POLICY, rate_limit
+
 from app.models.user import User
 from app.models.subject import Subject
 from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
 from app.schemas.document import DocumentRead, DocumentStatusRead
 from app.rag.document_processor import process_document_file
+
+# A4: upload and reprocess both write to disk and then run the whole chunk +
+# embed pipeline, so they are throttled per authenticated user. Reprocess is
+# included because it is the same cost as a fresh upload. See
+# app/core/rate_limit.py.
+limit_upload = rate_limit(UPLOAD_POLICY, user_dependency=get_current_user)
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
@@ -26,7 +34,8 @@ async def upload_document(
     subject_id: uuid.UUID = Form(...),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    _rate_limited: None = Depends(limit_upload),
 ) -> Any:
     """Uploads a PDF study document and triggers asynchronous vector chunking."""
     # 1. Validate Subject Ownership
@@ -254,7 +263,8 @@ async def reprocess_document(
     document_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    _rate_limited: None = Depends(limit_upload),
 ) -> Any:
     """Re-runs extraction and embedding for an owned document.
 
@@ -262,6 +272,14 @@ async def reprocess_document(
     behind, or the subject would show the same PDF twice. Stale chunks from a
     previous run are dropped and the row is returned to PROCESSING, so the
     previous outcome stays visible until the retry actually lands somewhere.
+
+    B6: the claim on the row is a compare-and-set rather than a read followed by
+    a write. The earlier check was a time-of-check/time-of-use window -- two
+    near-simultaneous retries (a double click, a retried request) could both
+    read a non-PROCESSING row and both enqueue a run, and ``document_chunks``
+    has no uniqueness constraint to catch the duplicate embeddings afterwards.
+    Claiming in the UPDATE means exactly one caller can win; the losers get the
+    same 409 a client sees when a run is genuinely in flight.
     """
     doc = await _load_owned_document(db, document_id, current_user)
 
@@ -277,12 +295,28 @@ async def reprocess_document(
             detail="The stored file is no longer available on the server. Please upload the PDF again."
         )
 
-    # Drop chunks from the previous run so a partial reprocess cannot leave
-    # superseded embeddings queryable. process_document_file would remove them
-    # too, but only after the new extraction succeeds.
+    # One statement decides the winner and clears the previous reason. Stale
+    # chunks from a previous run go in the same transaction, so a partial
+    # reprocess cannot leave superseded embeddings queryable: process_document_file
+    # would remove them too, but only after the new extraction succeeds.
+    claimed = await db.execute(
+        update(Document)
+        .where(
+            Document.id == doc.id,
+            Document.user_id == current_user.id,
+            Document.status != "PROCESSING",
+        )
+        .values(status="PROCESSING", error_message=None)
+        .returning(Document.id)
+    )
+    if claimed.scalar_one_or_none() is None:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Document is already being processed."
+        )
+
     await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc.id))
-    doc.status = "PROCESSING"
-    doc.error_message = None
     await db.commit()
     await db.refresh(doc)
 
