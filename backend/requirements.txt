@@ -1,19 +1,64 @@
-fastapi>=0.110.0
-uvicorn[standard]>=0.28.0
-pydantic[email]>=2.6.0
-email-validator>=2.1.0
-pydantic-settings>=2.2.0
-sqlalchemy>=2.0.28
-asyncpg>=0.29.0
-aiosqlite>=0.20.0
-pgvector>=0.2.5
-alembic>=1.13.0
-python-dotenv>=1.0.1
-google-genai>=0.1.1
-httpx>=0.27.0
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
-passlib[bcrypt]>=1.7.4
-pyjwt>=2.8.0
-python-multipart>=0.0.9
-pypdf>=4.1.0
+# Direct dependencies, pinned to the exact versions this project is developed
+# and tested against.
+#
+# B4: these used to be `>=`, which made every build resolve to whatever was
+# newest that day. A security patch landing in a transitive dependency could
+# therefore change what CI tested, or break a working deployment, with nothing
+# in the repository recording the change.
+#
+# `==` here pins the *direct* dependencies. The transitive closure is pinned in
+# constraints.txt and installed with:
+#
+#     pip install -c constraints.txt -r requirements.txt
+#
+# CI does exactly that. To move a version deliberately, change it here AND in
+# constraints.txt, and let the test suite decide whether it was safe.
+
+# --- Web framework -------------------------------------------------------
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+
+# --- Configuration and validation ---------------------------------------
+pydantic[email]==2.13.5
+email-validator==2.3.0
+pydantic-settings==2.15.0
+python-dotenv==1.2.3
+
+# --- Persistence --------------------------------------------------------
+sqlalchemy==2.1.1
+# SQLAlchemy's asyncio bridge imports greenlet to drive the async engine, and
+# it is only pulled in by the `sqlalchemy[asyncio]` extra. It is pinned here
+# directly rather than written as `sqlalchemy[asyncio]` so the version stays
+# explicit and matches constraints.txt; without it every
+# `sqlalchemy.ext.asyncio` import raises ImportError, so neither the app nor the
+# test suite loads.
+greenlet==3.5.6
+asyncpg==0.31.0
+# Test/dev only: the suite runs on SQLite so it needs no server.
+aiosqlite==0.22.1
+pgvector==0.5.0
+alembic==1.20.0
+
+# --- Integrations -------------------------------------------------------
+google-genai==2.25.0
+httpx==0.28.1
+pypdf==6.19.0
+python-multipart==0.0.32
+
+# --- Auth ---------------------------------------------------------------
+# passlib 1.7.4 is the last release of a project that is effectively
+# unmaintained. It is pinned exactly so an accidental upgrade cannot change
+# hashing behaviour, and the application only uses PBKDF2, which is in the
+# standard library rather than in the unmaintained `crypt` module passlib
+# prefers for some schemes.
+passlib[bcrypt]==1.7.4
+pyjwt==2.15.1
+
+# --- Test/dev only ------------------------------------------------------
+# Not needed to serve the API. They live in the same file because CI installs a
+# single file and the suite has to run against the same dependency versions the
+# app runs on -- a test environment that differs from production is a test
+# environment that proves less. Keep this group last so it is easy to split out
+# if a deployment ever needs a runtime-only install.
+pytest==9.1.1
+pytest-asyncio==1.4.0

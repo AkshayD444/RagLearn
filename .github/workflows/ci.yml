@@ -25,12 +25,19 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          # Both files: the cache key has to change when a constraint moves,
+          # or a stale wheel cache hides the change that was just made.
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/constraints.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # B4: `-c constraints.txt` pins the transitive closure, so a build
+          # resolves to the versions the suite is known to pass against rather
+          # than to whatever was newest that day.
+          pip install -c constraints.txt -r requirements.txt
 
       - name: Byte-compile the application
         run: python -m compileall -q app
@@ -39,7 +46,7 @@ jobs:
         run: python -m pytest -q
 
   backend-pgvector:
-    name: Backend pgvector integration tests
+    name: Backend migrations and pgvector integration tests
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -59,7 +66,17 @@ jobs:
       run:
         working-directory: backend
     env:
+      # B5: the migrations are executed against this same service, so the URL is
+      # defined once for both the Alembic run and the integration tests.
       TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ai_learning_assistant
+      # A1 removed the default signing key, and migrations/env.py imports
+      # app.core.config, so Alembic cannot even start without one. This is a
+      # throwaway CI-only value that signs nothing but the test process: it is
+      # long enough to satisfy the length check and contains none of the
+      # rejected placeholder text. No production secret is involved.
+      SECRET_KEY: 0f3c9a17d5b28e64a0c4f19d7e83b2650ca7f1d94be2368
+      # The suite runs fully offline; migrations must not be able to reach Gemini.
+      GEMINI_API_KEY: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -68,12 +85,120 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          # Both files: the cache key has to change when a constraint moves,
+          # or a stale wheel cache hides the change that was just made.
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/constraints.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # B4: `-c constraints.txt` pins the transitive closure, so a build
+          # resolves to the versions the suite is known to pass against rather
+          # than to whatever was newest that day.
+          pip install -c constraints.txt -r requirements.txt
+
+      - name: Wait for PostgreSQL to accept connections
+        # B5: the service health check above covers the container, but the
+        # first connection from the runner can still be refused while the server
+        # finishes its own startup, and "connection refused" is indistinguishable
+        # from a misconfigured URL. Retrying makes that a visible wait instead of
+        # a flaky failure. Done in Python rather than with pg_isready so the step
+        # depends on nothing beyond the dependencies the job already installs.
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+          import sys
+
+          import asyncpg
+
+          _scheme, remainder = os.environ["TEST_DATABASE_URL"].split("://", 1)
+          dsn = "postgresql://" + remainder
+          attempts = 30
+
+          async def wait_for_postgres() -> int:
+              last_error = None
+              for attempt in range(1, attempts + 1):
+                  try:
+                      connection = await asyncpg.connect(dsn=dsn)
+                  except Exception as exc:  # noqa: BLE001 - reported below
+                      last_error = exc
+                      print(f"attempt {attempt}/{attempts}: {exc}")
+                      await asyncio.sleep(1)
+                      continue
+                  try:
+                      # Also proves the server really is the pgvector build and
+                      # that the extension this application's schema depends on
+                      # can be created by the migrations.
+                      await connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                      version = await connection.fetchval(
+                          "SELECT extversion FROM pg_extension WHERE extname = 'vector'"
+                      )
+                      print(
+                          f"PostgreSQL ready after {attempt} attempt(s), pgvector {version}"
+                      )
+                      return 0
+                  finally:
+                      await connection.close()
+              print(f"PostgreSQL never became ready: {last_error}")
+              return 1
+
+          sys.exit(asyncio.run(wait_for_postgres()))
+          PY
+
+      - name: Apply migrations to PostgreSQL
+        # B5: this is the check that was missing. The migration suite ran only
+        # against SQLite, where there is no `vector` extension and
+        # `document_chunks.embedding` is a column *named* VECTOR(768) rather than
+        # a real pgvector column, so a migration could be green there and still
+        # fail on the database production runs. A non-zero exit fails the job.
+        run: |
+          alembic -x db_url="$TEST_DATABASE_URL" upgrade head
+          alembic -x db_url="$TEST_DATABASE_URL" current
+
+      - name: Verify the migrated schema matches the models
+        # The migration can "succeed" and still leave a schema the application
+        # refuses to serve, so this runs the startup reconciliation
+        # (app/core/schema.py) against the database the migration just produced
+        # and confirms the stamped revision is the head Alembic itself resolves.
+        # That is what makes "upgrade head" and "the code agrees with the
+        # database" the same statement rather than two hopeful ones.
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          from sqlalchemy.ext.asyncio import create_async_engine
+          from sqlalchemy.pool import NullPool
+
+          from app.core.schema import current_revision, ensure_schema
+
+          url = os.environ["TEST_DATABASE_URL"]
+          cfg = Config("alembic.ini")
+          heads = ScriptDirectory.from_config(cfg).get_heads()
+          if len(heads) != 1:
+              raise SystemExit(f"expected exactly one migration head, got {sorted(heads)}")
+
+          async def reconcile() -> str:
+              engine = create_async_engine(url, poolclass=NullPool)
+              try:
+                  async with engine.begin() as connection:
+                      # Raises unless the stamped revision is current.
+                      await connection.run_sync(ensure_schema)
+                  async with engine.connect() as connection:
+                      return await connection.run_sync(current_revision)
+              finally:
+                  await engine.dispose()
+
+          stamped = asyncio.run(reconcile())
+          if stamped != heads[0]:
+              raise SystemExit(f"database is at {stamped}, head is {heads[0]}")
+          print(f"Schema is at head ({stamped}); app.core.schema.ensure_schema is satisfied.")
+          PY
 
       - name: Run the pgvector integration tests
         run: python -m pytest -q -m postgres
@@ -95,7 +220,11 @@ jobs:
           node-version: "20"
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        # B4: `npm ci` installs exactly what package-lock.json records and fails
+        # if the lock and package.json disagree. `npm install` would quietly
+        # update the lock to match a newer resolution, which is the behaviour
+        # this stops.
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck
         run: npm run typecheck

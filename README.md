@@ -41,8 +41,12 @@ The database will run on `localhost:5432` with database `ai_learning_assistant`.
    ```
 3. Install dependencies:
    ```bash
-   pip install -r requirements.txt
+   # -c applies constraints.txt, which pins the full transitive dependency
+   # graph. Drop the -c and you still get pinned direct dependencies, but
+   # transitive versions float.
+   pip install -c constraints.txt -r requirements.txt
    ```
+
 4. Configure environment variables:
    ```bash
    cp .env.example .env
@@ -66,7 +70,10 @@ The database will run on `localhost:5432` with database `ai_learning_assistant`.
    ```
 2. Install dependencies:
    ```bash
-   npm install
+   # npm ci installs exactly what package-lock.json pins, and fails if the
+   # lock and package.json disagree. Use `npm install` only when you mean to
+   # update the lock.
+   npm ci
    ```
 3. Configure environment variables:
    ```bash
@@ -147,12 +154,21 @@ TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ai_learn
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run typecheck              # tsc --noEmit
 npm test                       # Vitest
 npm run lint                   # next lint
 npm run build                  # production build (also type-checks and lints)
 ```
+
+Dependency versions are pinned rather than ranged, so a build resolves to what
+the suite is known to pass against: `backend/requirements.txt` pins the direct
+dependencies, `backend/constraints.txt` pins the full transitive closure, and
+`frontend/package-lock.json` pins the frontend. CI installs with
+`pip install -c constraints.txt -r requirements.txt` and `npm ci`, so a lock that
+drifts from the manifests fails the build instead of quietly installing
+something new. Bumping a version is a deliberate edit to two files, not a
+side effect of installing.
 
 `.github/workflows/ci.yml` runs these same commands across three jobs: backend
 (SQLite), backend pgvector integration tests, and frontend typecheck/lint/test/build.
