@@ -53,7 +53,10 @@ async def subject_owner(registered_user, subject):
 
 
 @pytest.mark.asyncio
-async def test_flashcard_routes_require_authentication(client, subject):
+async def test_flashcard_routes_require_authentication(anonymous_client, subject):
+    # B2: `anonymous_client`, because the shared client is signed in by cookie
+    # from the moment it registers; asserting 401 on it would prove nothing.
+    client = anonymous_client
     deck_id = str(uuid.uuid4())
 
     assert (await client.post(

@@ -7,6 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, require_owned_subject
+from app.core.rate_limit import GENERATIVE_POLICY, rate_limit
+
 from app.models.study_plan import StudyPlan, StudyPlanItem, StudyPlanSession
 from app.models.subject import Subject
 from app.models.user import User
@@ -23,6 +25,10 @@ from app.services.study_planner import (
     load_study_plan,
     persist_study_plan,
 )
+
+# A4: all three plan-generation entry points spend Gemini credits, so each is
+# throttled per authenticated user. See app/core/rate_limit.py.
+limit_generative = rate_limit(GENERATIVE_POLICY, user_dependency=get_current_user)
 
 router = APIRouter(prefix="/study-plans", tags=["Study Plans"])
 
@@ -110,6 +116,7 @@ async def generate_study_plan(
     payload: StudyPlanGenerateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rate_limited: None = Depends(limit_generative),
 ) -> Any:
     subject = await require_owned_subject(db, payload.subject_id, current_user)
     return await _generate_plan(subject=subject, payload=payload, db=db, current_user=current_user)
@@ -120,6 +127,7 @@ async def create_study_plan(
     payload: StudyPlanGenerateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rate_limited: None = Depends(limit_generative),
 ) -> Any:
     subject = await require_owned_subject(db, payload.subject_id, current_user)
     return await _generate_plan(subject=subject, payload=payload, db=db, current_user=current_user)
@@ -135,6 +143,7 @@ async def generate_subject_study_plan(
     payload: Optional[StudyPlanOptions] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rate_limited: None = Depends(limit_generative),
 ) -> Any:
     subject = await require_owned_subject(db, subject_id, current_user)
     return await _generate_plan(

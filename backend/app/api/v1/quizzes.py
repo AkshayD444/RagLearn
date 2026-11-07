@@ -7,6 +7,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user, require_owned_subject
+from app.core.rate_limit import GENERATIVE_POLICY, rate_limit
+
 from app.models.attempt import QuizAttempt, QuizAttemptAnswer
 from app.models.quiz import Quiz, QuizQuestion
 from app.models.subject import Subject
@@ -32,6 +34,10 @@ from app.services.student_intelligence import (
     persist_attempt,
     score_evaluations,
 )
+
+# A4: quiz generation spends Gemini credits, so it is throttled per
+# authenticated user. See app/core/rate_limit.py.
+limit_generative = rate_limit(GENERATIVE_POLICY, user_dependency=get_current_user)
 
 router = APIRouter(prefix="/quizzes", tags=["Quizzes"])
 
@@ -107,6 +113,7 @@ async def generate_quiz(
     payload: QuizGenerateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rate_limited: None = Depends(limit_generative),
 ) -> Any:
     """Generates a grounded MCQ quiz from the user's own subject documents."""
     subject = await require_owned_subject(db, payload.subject_id, current_user)

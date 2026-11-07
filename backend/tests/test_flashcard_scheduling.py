@@ -113,8 +113,8 @@ async def test_deck_list_reports_due_count(client, owner, seeded_chunks):
 
 
 @pytest.mark.asyncio
-async def test_due_queue_requires_authentication(client, owner):
-    assert (await client.get("/api/v1/flashcards/due")).status_code == 401
+async def test_due_queue_requires_authentication(anonymous_client, owner):
+    assert (await anonymous_client.get("/api/v1/flashcards/due")).status_code == 401
 
 
 @pytest.mark.asyncio
@@ -409,8 +409,9 @@ async def test_reschedule_returns_a_card_to_the_queue(client, owner, seeded_chun
 
 
 @pytest.mark.asyncio
-async def test_reschedule_requires_authentication(client, owner, seeded_chunks):
+async def test_reschedule_requires_authentication(client, owner, seeded_chunks, forget_session):
     deck = await _deck(client, owner, seeded_chunks)
+    forget_session(client)
     res = await client.post(f"/api/v1/flashcards/cards/{deck['cards'][0]['id']}/reschedule")
     assert res.status_code == 401
 

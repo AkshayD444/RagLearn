@@ -1,5 +1,5 @@
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +22,13 @@ FLASHCARD_SYSTEM_PROMPT = (
     "Do not use outside knowledge, do not invent facts, and do not create a card that "
     "cannot be answered from the excerpts alone. "
     "Each back must be concise and self-contained, and each front must be answerable "
-    "from its own back."
+    "from its own back. "
+    "Vary the form of the fronts across the set: ask about definitions, purposes, "
+    "requirements, sequences and comparisons. Do not build every front by removing a "
+    "single word from the same sentence, and do not reuse one sentence for several cards. "
+    "Running headers, page numbers, module labels and footers are document layout, not "
+    "study material, so never make them the subject of a card. "
+    "Each card must cover a distinct concept from the excerpts."
 )
 
 
@@ -69,43 +75,181 @@ def _source_hint(chunk: dict) -> Optional[str]:
     return None
 
 
-def _generate_deterministic(card_count: int, chunks: List[dict]) -> List[dict]:
-    """Offline fallback: builds grounded cloze flashcards.
+# Verbs that signal a definitional study sentence, grouped by the question shape
+# each one supports. Only used to recognise a sentence that is worth asking
+# about; no external knowledge is introduced.
+_ROLE_VERBS = frozenset(
+    """allow require provide use involve perform support enable mean represent
+    define describe specify determine control manage handle contain include
+    replace avoid reduce increase maintain ensure guarantee distinguish
+    store hold record refer appear denote indicate mark name call cause need
+    ground combine separate coordinate""".split()
+)
+_PROCESS_VERBS = frozenset(
+    """proceed work occur happen operate function begin start end follow""".split()
+)
 
-    Both sides of every card are derived from the retrieved chunk text itself --
-    the front is the sentence with one term blanked, the back is that term plus
-    the untouched sentence -- so no content can be introduced that the user's own
-    material does not contain.
+
+def _is_definitional_verb(word: str) -> Optional[str]:
+    """Classify a word as a definitional verb, tolerating inflection.
+
+    Returns "role", "process", or None. Without inflection handling the scan
+    missed "allows" and "requires" -- the commonest verbs in lecture prose --
+    and fell through to the cloze path for most sentences.
+    """
+    lowered = word.strip(",;:.").lower()
+    if lowered in _ROLE_VERBS:
+        return "role"
+    if lowered in _PROCESS_VERBS:
+        return "process"
+
+    # Third person / past / gerund forms of the same stems.
+    for suffix in ("s", "es", "ed", "ing"):
+        if lowered.endswith(suffix):
+            stem = lowered[: -len(suffix)]
+            if stem in _ROLE_VERBS:
+                return "role"
+            if stem in _PROCESS_VERBS:
+                return "process"
+    # Irregular forms worth covering explicitly.
+    if lowered in {"begins", "began", "begun", "begun"}:
+        return "process"
+    return None
+
+
+def _leading_noun_phrase(sentence: str) -> Optional[str]:
+    """The sentence's subject phrase, or None when it is not definitional.
+
+    Keeps only the opening noun phrase of a sentence that has a recognisable
+    verb, so the question can name the thing actually being described. This is
+    pattern recognition over the user's own text, not generation.
+
+    The verb must be *immediately* after the subject. Scanning the whole
+    sentence for the first known verb instead would happily swallow half a
+    sentence into the subject ("CPU performs one instruction to"), producing a
+    nonsense question.
+    """
+    words = sentence.split()
+    if len(words) < 5:
+        return None
+
+    subject_words = []
+    verb_kind = None
+    for word in words:
+        verb_kind = _is_definitional_verb(word)
+        if verb_kind is not None:
+            break
+        subject_words.append(word)
+        if len(subject_words) > 6:
+            return None
+    else:
+        return None
+
+    # Drop a leading article; keep the rest as-is so acronyms and proper nouns
+    # ("Direct Memory Access", "DMA controller") survive verbatim.
+    if subject_words and subject_words[0].lower() in {"a", "an", "the"}:
+        subject_words = subject_words[1:]
+    if not subject_words:
+        return None
+
+    subject = " ".join(subject_words).strip(" ,;:-")
+    if len(subject) < 3:
+        return None
+    # Reject a "subject" that is mostly punctuation or digits, e.g. a bare label.
+    if not re.search(r"[A-Za-z]{3}", subject):
+        return None
+    # The subject must be a phrase, not a clause: a comma means the verb we
+    # matched was not this sentence's main verb.
+    if "," in subject:
+        return None
+    return subject
+
+
+def _question_for(subject: str, sentence: str, rotation: int) -> str:
+    """One question about ``subject``, chosen to keep fronts varied.
+
+    A sequence sentence ("A DMA transfer proceeds by...") gets the process form
+    rather than a static-definition one, because that is what the sentence
+    actually supports. The remaining forms rotate so a deck does not repeat a
+    single template.
+    """
+    is_process = any(
+        _is_definitional_verb(word) == "process" for word in sentence.split()
+    )
+    if is_process:
+        # One card per concept, so there is nothing to rotate against: a
+        # sequence sentence always gets the sequence question.
+        return f"How does {subject} work?"
+    forms = [
+        f"What is {subject}?",
+        f"What does {subject} do?",
+        f"What is the role of {subject} in this system?",
+    ]
+    return forms[rotation % len(forms)]
+
+
+def _generate_deterministic(card_count: int, chunks: List[dict]) -> List[dict]:
+    """Offline fallback: builds concept-based flashcards from retrieved sentences.
+
+    One card per *concept*, not per blankable word. The previous implementation
+    emitted one card for every removable word in a sentence, so a 10-card deck
+    consumed 10 blanks from the first sentence and never reached the later ones
+    -- ten near-identical cloze cards from a single line of text.
+
+    Each card pairs a question about a concept with the source sentence as the
+    answer, so the deck stays strictly grounded in the student's own material.
+    Sentences are consumed in order and each is used once, which is what spreads
+    the deck across distinct concepts.
     """
     sentences = _extract_sentences(chunks)
+    if not sentences:
+        return []
 
-    candidates = []
-    seen = set()
+    # Group by concept so a subject repeated across sentences yields one card
+    # with the fullest explanation, rather than several near-duplicates.
+    by_concept: Dict[str, List[tuple]] = {}
+    order: List[str] = []
     for sentence, chunk in sentences:
-        for token in _candidate_tokens(sentence):
-            key = (sentence, token)
-            if key in seen:
-                continue
-            seen.add(key)
-            candidates.append((token, sentence, chunk))
+        subject = _leading_noun_phrase(sentence)
+        key = (subject or sentence).lower()
+        if key not in by_concept:
+            by_concept[key] = []
+            order.append(key)
+        by_concept[key].append((subject, sentence, chunk))
 
     items: List[dict] = []
-    for token, sentence, chunk in candidates:
+    for key in order:
         if len(items) >= card_count:
             break
 
-        blanked, _ = re.subn(
-            re.escape(token), "_____", sentence, count=1, flags=re.IGNORECASE
-        )
-        if blanked == sentence:
-            # The token was matched case-insensitively into an identical string;
-            # nothing was blanked, so the card would give the answer away.
+        subject, sentence, chunk = by_concept[key][0]
+        if subject is None:
+            # No recognisable subject: keep the old grounded cloze shape for this
+            # one sentence rather than dropping usable study content.
+            tokens = _candidate_tokens(sentence)
+            if not tokens:
+                continue
+            token = tokens[0]
+            blanked, replaced = re.subn(
+                re.escape(token), "_____", sentence, count=1, flags=re.IGNORECASE
+            )
+            if not replaced:
+                continue
+            items.append(
+                _card_from_chunk(
+                    f'Complete the statement: "{blanked}"',
+                    f'"{token}" - {sentence}',
+                    _source_hint(chunk),
+                    chunk,
+                )
+            )
             continue
 
+        front = _question_for(subject, sentence, len(items))
         items.append(
             _card_from_chunk(
-                f'Complete the statement: "{blanked}"',
-                f'"{token}" - {sentence}',
+                front,
+                sentence,
                 _source_hint(chunk),
                 chunk,
             )

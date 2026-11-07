@@ -53,23 +53,30 @@ def test_deterministic_cards_are_built_from_the_retrieved_text():
     chunks = [_chunk(f"{SENTENCE_ONE} {SENTENCE_TWO}")]
     cards = _generate_deterministic(3, chunks)
 
-    assert len(cards) == 3
+    # Two definitional sentences -> two concepts -> two cards. The old cloze
+    # generator answered any card_count by re-cutting the first sentence, which
+    # is exactly the repetition this deck shape is meant to remove.
+    assert len(cards) == 2
     for card in cards:
-        # Every card is a blanked sentence plus the term that fills the blank.
-        assert card["front_text"].startswith('Complete the statement: "')
-        assert "_____" in card["front_text"]
-        assert _quoted_token(card["back_text"]) not in card["front_text"]
+        # Every card pairs a question with the sentence that answers it, so the
+        # answer side is always drawn from the student's own material.
+        assert card["front_text"].strip()
+        assert card["back_text"].strip()
+        assert card["front_text"].startswith(
+            ("What is", "What does", "How does", "What are", "What happens")
+        )
 
 
 def test_deterministic_cards_never_introduce_terms_absent_from_the_source():
-    """The core grounding guarantee: no answer term outside the retrieved text."""
+    """The core grounding guarantee: no answer text outside the retrieved text."""
     source = f"{SENTENCE_ONE} {SENTENCE_TWO}"
     cards = _generate_deterministic(20, [_chunk(source)])
 
     assert cards
     for card in cards:
-        token = _quoted_token(card["back_text"])
-        assert token in source.lower()
+        # The answer is the source sentence itself, or the cloze fallback whose
+        # back embeds that same sentence verbatim after the answer term.
+        assert source.split(". ")[0] in card["back_text"] or card["back_text"] in source
 
 
 def test_deterministic_cards_carry_citation_snapshots():
@@ -233,7 +240,9 @@ async def _fallback_cards(service, chunks, *, card_count):
 
 async def test_generate_deck_falls_back_to_deterministic_cards(monkeypatch):
     """A Gemini failure must degrade to grounded offline cards, never to an error."""
-    chunks = [_chunk(SENTENCE_ONE)]
+    # Two distinct concepts: the deck now emits one card per concept, so a single
+    # definitional sentence would correctly yield a single card.
+    chunks = [_chunk(f"{SENTENCE_ONE} {SENTENCE_TWO}")]
 
     async def _boom(*args, **kwargs):
         raise RuntimeError("Gemini is unreachable")
@@ -254,3 +263,176 @@ def test_system_prompt_demands_exclusive_grounding():
     assert "EXCLUSIVELY" in prompt
     assert "do not invent facts" in prompt
     assert "Do not use outside knowledge" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Regression: a deck must not be one cloze template cut from a single sentence
+#
+# The original fallback produced "Complete the statement: <sentence with one
+# word removed>" once per blankable word, sentence-major. A request for 10 cards
+# was satisfied entirely from the first sentence, so a real deck arrived as ten
+# near-identical cards covering one idea -- e.g. "Direct Memory Access" blanked
+# at "peripheral", then "transfer", then "directly", ...
+# ---------------------------------------------------------------------------
+
+DMA_PASSAGE = (
+    "Direct Memory Access allows a peripheral device to transfer data directly "
+    "to memory without passing through the CPU. "
+    "The DMA controller requires the address of the memory location and the "
+    "number of bytes to transfer. "
+    "A DMA transfer proceeds by the device asserting a bus request, the "
+    "controller granting the bus, and the transfer completing with an interrupt. "
+    "The CPU performs one instruction to start a DMA operation. "
+    "Memory mapped I/O uses the same address space as instructions. "
+    "Interrupt driven I/O avoids the need for continuous polling. "
+    "Polling requires the processor to check device status repeatedly."
+)
+
+
+def _dma_chunk() -> dict:
+    return _chunk(DMA_PASSAGE)
+
+
+def test_a_deck_is_not_repeated_single_word_cloze_extraction():
+    """The direct regression: 10 requested cards, but not 10 blanks of one line."""
+    cards = _generate_deterministic(10, [_dma_chunk()])
+
+    assert cards
+    cloze = [c for c in cards if c["front_text"].startswith("Complete the statement:")]
+    assert not cloze, f"{len(cloze)} card(s) were still built by blanking one word"
+
+
+def test_cards_are_drawn_from_several_distinct_source_sentences():
+    """One sentence must never yield the whole deck again."""
+    cards = _generate_deterministic(10, [_dma_chunk()])
+
+    answers = {c["back_text"] for c in cards}
+    assert len(answers) == len(cards)
+    assert len(answers) >= 4, "deck covered too little of the passage"
+
+
+def test_cards_cover_different_concepts():
+    """Each card should ask about a different subject drawn from the passage."""
+    cards = _generate_deterministic(10, [_dma_chunk()])
+
+    fronts = [c["front_text"] for c in cards]
+    assert len(set(fronts)) == len(fronts)
+
+    subjects = [
+        f.split("?")[0]
+        for f in fronts
+        if f.startswith(("What is ", "What does ", "How does ", "What happens"))
+    ]
+    # Not the same subject re-asked with different wording.
+    assert len(set(subjects)) == len(subjects)
+
+
+def test_concept_cards_ask_a_question_rather_than_a_gap():
+    """Fronts are questions about concepts, not sentences with a hole in them."""
+    cards = _generate_deterministic(10, [_dma_chunk()])
+
+    for card in cards:
+        front = card["front_text"]
+        assert front.endswith("?") or front.startswith("Complete the statement:")
+        if front.endswith("?"):
+            assert "_____" not in front
+            assert not front.startswith("Complete")
+
+
+def test_card_answers_are_verbatim_source_sentences():
+    """Grounding: the answer side must exist in the uploaded material."""
+    cards = _generate_deterministic(10, [_dma_chunk()])
+
+    for card in cards:
+        assert card["back_text"] in DMA_PASSAGE
+
+
+def test_cards_keep_their_source_citations():
+    """Requirement: citations survive the change to concept questions."""
+    chunk = _dma_chunk()
+    cards = _generate_deterministic(10, [chunk])
+
+    for card in cards:
+        assert card["document_id"] == chunk["document_id"]
+        assert card["chunk_id"] == chunk["chunk_id"]
+        assert card["document_title"] == chunk["document_title"]
+        assert card["page_number"] == chunk["page_number"]
+        assert card["source_snippet"] == chunk["content"][:400]
+        assert card["hint"] == 'From "Vector Notes.pdf", page 3.'
+
+
+def test_process_sentences_get_a_process_question():
+    """A sequence sentence supports "how", not a static definition."""
+    cards = _generate_deterministic(10, [_dma_chunk()])
+
+    backs = [c["back_text"] for c in cards]
+    fronts = [c["front_text"] for c in cards]
+    transfer_cards = [
+        f for f, b in zip(fronts, backs) if b.startswith("A DMA transfer proceeds")
+    ]
+    assert transfer_cards, "the transfer sentence should have produced a card"
+    assert any(f.startswith("How does") for f in transfer_cards)
+
+
+def test_header_only_material_still_produces_no_cards():
+    """The metadata/header filter from the quiz fix must still apply here."""
+    header = "Computer Systems — Module 1/2: I/O Organisation Page 3."
+    assert _generate_deterministic(10, [_chunk(header)]) == []
+
+
+def test_definitional_verb_detection_tolerates_inflection():
+    """Lecture prose is third-person: "allows", not "allow"."""
+    from app.services.flashcard_engine import _is_definitional_verb
+
+    assert _is_definitional_verb("allows") == "role"
+    assert _is_definitional_verb("requires") == "role"
+    assert _is_definitional_verb("uses") == "role"
+    assert _is_definitional_verb("proceeds") == "process"
+    assert _is_definitional_verb("avoids") == "role"
+    assert _is_definitional_verb("Page") is None
+    assert _is_definitional_verb("the") is None
+
+
+def test_leading_noun_phrase_stops_at_the_verb():
+    """The subject must not swallow the rest of the sentence.
+
+    Scanning the whole sentence for the first known verb produced subjects like
+    "CPU performs one instruction to", which generated the nonsense question
+    "What is CPU performs one instruction to?".
+    """
+    from app.services.flashcard_engine import _leading_noun_phrase
+
+    assert (
+        _leading_noun_phrase("Direct Memory Access allows a peripheral device to transfer data.")
+        == "Direct Memory Access"
+    )
+    assert (
+        _leading_noun_phrase("The CPU performs one instruction to start the transfer.")
+        == "CPU"
+    )
+    assert _leading_noun_phrase("The and for are but not.") is None
+
+
+def test_leading_noun_phrase_rejects_an_overlong_run():
+    """A definitional verb far from the start means there is no real subject.
+
+    Without the length cap, "The processor unit which sits inside the chassis
+    and connects to the system bus uses arbitration" would yield the subject
+    "processor unit which sits inside the chassis and connects to the system
+    bus" and a question no student could parse.
+    """
+    from app.services.flashcard_engine import _leading_noun_phrase
+
+    long_run = (
+        "The processor unit which sits inside the chassis and connects to the "
+        "system bus uses arbitration."
+    )
+    assert _leading_noun_phrase(long_run) is None
+
+
+def test_gemini_prompt_forbids_the_blank_the_word_pattern():
+    """The model path gets the same diversity rule as the fallback."""
+    prompt = engine.FLASHCARD_SYSTEM_PROMPT
+    assert "removing a" in prompt
+    assert "distinct concept" in prompt
+    assert "Running headers" in prompt

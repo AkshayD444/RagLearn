@@ -1,7 +1,7 @@
 import math
 import uuid
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional, Sequence
 
 from sqlalchemy import func, select
@@ -59,6 +59,19 @@ class StudyPlanItemDraft:
     # database. It never feeds `priority` -- that comes from the recommendation
     # engine unchanged, so adding scheduling cannot re-rank an existing plan.
     due_cards: int = 0
+
+
+def _local_date(moment: datetime) -> date:
+    """The calendar date a UTC instant falls on in the server's local zone.
+
+    Scheduling is a human-facing calendar concept: a target date is compared
+    against "today" as the user experiences it. Storage is UTC, so
+    ``moment.date()`` is the wrong source whenever the local zone is not UTC --
+    it reports yesterday's date during the local evening and tomorrow's during
+    the local morning. Treating the stored value as UTC and converting is what
+    keeps the two in step.
+    """
+    return moment.replace(tzinfo=timezone.utc).astimezone().date()
 
 
 @dataclass(frozen=True)
@@ -302,7 +315,7 @@ async def persist_study_plan(
         available_minutes_per_day=available_minutes_per_day,
         requested_sessions=requested_sessions,
         max_topics_per_session=max_topics_per_session,
-        today=created_at.date(),
+        today=_local_date(created_at),
         material_available=material_available,
     )
 

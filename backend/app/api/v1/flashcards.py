@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.api.deps import get_current_user, get_db, require_owned_subject
+from app.core.rate_limit import GENERATIVE_POLICY, rate_limit
+
 from app.models.flashcard import Flashcard, FlashcardDeck, FlashcardReview
 from app.models.mastery import TopicMastery
 from app.models.user import User
@@ -39,6 +41,10 @@ from app.services.flashcard_schedule import (
 from app.services.quiz_engine import NoStudyMaterialsError
 from app.services.spaced_repetition import is_new
 from app.services.student_intelligence import apply_flashcard_counters, normalize_topic
+
+# A4: deck generation spends Gemini credits, so it is throttled per
+# authenticated user. See app/core/rate_limit.py.
+limit_generative = rate_limit(GENERATIVE_POLICY, user_dependency=get_current_user)
 
 router = APIRouter(prefix="/flashcards", tags=["Flashcards"])
 
@@ -190,6 +196,7 @@ async def generate_flashcards(
     payload: FlashcardGenerateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _rate_limited: None = Depends(limit_generative),
 ) -> Any:
     """Generates a grounded flashcard deck from the user's own subject documents."""
     subject = await require_owned_subject(db, payload.subject_id, current_user)

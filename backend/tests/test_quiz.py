@@ -171,13 +171,16 @@ async def test_quiz_generate_honors_count_difficulty_topic_and_whitespace():
 
 
 @pytest.mark.asyncio
-async def test_quiz_generate_validation_errors():
+async def test_quiz_generate_validation_errors(forget_session):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         token, _ = await _register(ac, "quiz_validate@example.com")
         subject_id = await _create_subject(ac, token, "Validation Subject")
         headers = _auth(token)
 
-        # 401 without token
+        # 401 without a token. B2: the client's cookie jar is cleared first,
+        # because the session cookie now authenticates just as well as a header
+        # and this assertion is about carrying no credential at all.
+        forget_session(ac)
         no_token = await ac.post(
             "/api/v1/quizzes/generate", json={"subject_id": subject_id}
         )

@@ -14,6 +14,7 @@ from app.models.mastery import TopicMastery
 from app.models.quiz import Quiz, QuizQuestion
 from app.models.study_plan import StudyPlan, StudyPlanItem, StudyPlanSession
 from app.services.student_intelligence import compute_accuracy, compute_mastery, mastery_level
+from app.services.study_planner import _local_date
 from tests.conftest import TestAsyncSessionLocal
 
 
@@ -407,6 +408,52 @@ async def test_invalid_target_date_is_rejected():
             ac, token, subject_id, target_date="not-a-date"
         )
         assert invalid_format.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_local_date_of_now_matches_the_calendar_date():
+    """The scheduling anchor must be the local date, not the stored UTC one.
+
+    Storage is UTC, but a target date is compared against the calendar day the
+    user is living in. Whenever the server's local zone is not UTC those two
+    disagree for part of every day, and the disagreement is what let a
+    yesterday-dated plan validate as "today or later" this test file already
+    covers. Asserting the two agree is exact: it fails on any host where the
+    local day has rolled over ahead of UTC, and holds trivially on a UTC host.
+    """
+    assert _local_date(datetime.utcnow()) == date.today()
+
+
+@pytest.mark.asyncio
+async def test_target_date_boundary_tracks_the_local_calendar_day():
+    """Yesterday is rejected and today is accepted, in the local calendar.
+
+    The two cases straddle the boundary the bug lived on. Deriving the
+    schedule's start day from the UTC timestamp instead of the local one
+    shifted the whole window by a day, so a local "yesterday" read as today
+    (accepted) and a local "today" read as tomorrow.
+    """
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        token, user_id = await _register(ac, "plan_local_date_boundary@example.com")
+        subject_id = await _create_subject(ac, token)
+        now = datetime.utcnow()
+        await _seed_topic_history(
+            user_id, subject_id, "Topic", [(False, now - timedelta(hours=1))] * 4
+        )
+
+        yesterday = await _generate(
+            ac, token, subject_id, target_date=(date.today() - timedelta(days=1)).isoformat()
+        )
+        assert yesterday.status_code == 400
+        assert "target date" in yesterday.json()["detail"].lower()
+
+        today = await _generate(
+            ac, token, subject_id, target_date=date.today().isoformat()
+        )
+        assert today.status_code == 201
+        # A single-day window must schedule on that exact day, proving the plan
+        # was anchored to local today rather than to tomorrow in UTC.
+        assert today.json()["sessions"][0]["scheduled_date"] == date.today().isoformat()
 
 
 @pytest.mark.asyncio

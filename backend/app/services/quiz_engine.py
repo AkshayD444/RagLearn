@@ -37,17 +37,88 @@ _STOPWORDS = {
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z-]+")
 
+# Running headers/footers are extracted by pypdf as ordinary body text, so they
+# arrive inside chunk content and score well against a subject-title query. Left
+# alone they become the highest-value "sentences" in the chunk and produce
+# cloze items like 'Computer Systems ___ -- Module 1/2: I/O Organisation Page 3'.
+#
+# Detection is deliberately narrow and evidence-based rather than a blocklist of
+# title words, because real study sentences legitimately contain words like
+# "systems" or "organisation". A sentence is dropped only when it shows several
+# independent structural signals at once.
+_METADATA_LABELS = re.compile(
+    r"\b(page|pages|module|modules|chapter|unit|section|slide|lecture|week|"
+    r"part|appendix|annex|figure|fig|table|exhibit|version|rev|"
+    r"copyright|all\s+rights\s+reserved|printed|print)\b\.?",
+    re.IGNORECASE,
+)
+_BARE_PAGE_NUMBER_RE = re.compile(r"(?<!\w)\d{1,4}\s*$")
+_WHITESPACE_RE = re.compile(r"\s+")
+# Lowercase function words are the signal that a line is prose. Prose sentences
+# use them; a running title ("Computer Systems -- Module 1/2") has none.
+_PROSE_MARKERS = frozenset(
+    """a an the of and or but if then than that this these those is are was were be
+    been being to in on at by for with from as it its into over under between
+    during each every any all some such not can will would may might must should
+    do does did have has had you your we our they their he she""".split()
+)
+
+
+def _is_metadata_boilerplate(sentence: str) -> bool:
+    """True for running titles, page labels and similar layout text.
+
+    Requires at least two independent signals so a genuine study sentence that
+    happens to mention a page number is not discarded:
+
+    1. A layout label ("Page 3", "Module 1"), or a line that is mostly digits.
+    2. Almost no lowercase prose markers -- i.e. it reads like a heading.
+    3. An em/en dash or pipe used to bolt the title onto the label, which is how
+       most running heads are laid out on the page.
+
+    A single signal is not enough. "The memory mapped interface registers appear
+    on page 4 of the manual." contains a label but is plainly prose, and it must
+    survive.
+    """
+    labels = len(_METADATA_LABELS.findall(sentence))
+    digit_ratio = sum(ch.isdigit() for ch in sentence) / max(len(sentence), 1)
+    has_separator = bool(re.search(r"[—–|]", sentence))
+    words = _WHITESPACE_RE.split(sentence)
+    prose_markers = sum(1 for w in words if w.strip(".,:;!?()").lower() in _PROSE_MARKERS)
+
+    signals = 0
+    # A label is meaningful only if it is followed by a number ("page 4"), not
+    # the word "page" used in ordinary prose.
+    if labels and re.search(r"\b\d", sentence):
+        signals += 1
+    if digit_ratio > 0.08 or (labels and _BARE_PAGE_NUMBER_RE.search(sentence)):
+        signals += 1
+    if has_separator:
+        signals += 1
+    if prose_markers <= 1:
+        signals += 1
+
+    # Two signals minimum. "page" alone, or a dash alone, never removes content.
+    return signals >= 2
+
 
 def _extract_sentences(chunks: List[dict]) -> List[tuple]:
-    """Splits chunk content into sentences of reasonable question length."""
+    """Splits chunk content into sentences of reasonable question length.
+
+    Layout boilerplate (running titles, "Page 4", "Module 1/2") is dropped here
+    so it can never become a question stem or a distractor. Substantive prose
+    from the very same chunk is kept.
+    """
     sentences = []
     for chunk in chunks:
         content = chunk.get("content") or ""
         for raw in _SENTENCE_SPLIT_RE.split(content):
-            sentence = re.sub(r"\s+", " ", raw).strip()
+            sentence = _WHITESPACE_RE.sub(" ", raw).strip()
             words = sentence.split()
-            if 4 <= len(words) <= 40:
-                sentences.append((sentence, chunk))
+            if not (4 <= len(words) <= 40):
+                continue
+            if _is_metadata_boilerplate(sentence):
+                continue
+            sentences.append((sentence, chunk))
     return sentences
 
 
@@ -66,17 +137,31 @@ def _candidate_tokens(sentence: str) -> List[str]:
 
 
 def _distractor_pool(chunks: List[dict]) -> List[str]:
-    """Candidate distractor terms drawn from the subject's own retrieved content."""
+    """Candidate distractor terms drawn from the subject's own retrieved content.
+
+    Built from sentences that survived the boilerplate filter rather than from
+    raw chunk text. The two must stay in step: when a running header was a
+    question stem, its words ("module", "systems", "computer") also filled the
+    option list, which is why every distractor was a word from the title.
+
+    Only the boilerplate filter applies here. The 4-40 word floor in
+    `_extract_sentences` is a question-length heuristic, and a distractor term
+    is equally usable from a short phrase, so it is deliberately not reused.
+    """
     pool = []
     seen = set()
     for chunk in chunks:
         content = chunk.get("content") or ""
-        for match in _TOKEN_RE.findall(content):
-            token = match.strip("-").lower()
-            if len(token) < 4 or token in _STOPWORDS or token in seen:
+        for raw in _SENTENCE_SPLIT_RE.split(content):
+            sentence = _WHITESPACE_RE.sub(" ", raw).strip()
+            if not sentence or _is_metadata_boilerplate(sentence):
                 continue
-            seen.add(token)
-            pool.append(token)
+            for match in _TOKEN_RE.findall(sentence):
+                token = match.strip("-").lower()
+                if len(token) < 4 or token in _STOPWORDS or token in seen:
+                    continue
+                seen.add(token)
+                pool.append(token)
     return pool
 
 
