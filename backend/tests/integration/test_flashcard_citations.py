@@ -35,7 +35,7 @@ MATERIAL = [
 ]
 
 
-async def _client() -> AsyncClient:
+def _client() -> AsyncClient:
     return AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     )
