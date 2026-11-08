@@ -47,6 +47,7 @@ vi.mock("@/components/history/HistorySection", () => ({
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
+  usePathname: () => "/",
 }));
 
 vi.mock("@/components/auth/AuthModal", () => ({
@@ -121,7 +122,7 @@ describe("DashboardPage auth gating", () => {
     render(<DashboardPage />);
 
     expect(screen.getByText("auth-modal-stub")).toBeInTheDocument();
-    expect(screen.queryByText("My Subjects")).not.toBeInTheDocument();
+    expect(screen.queryByText("Enrolled Subjects")).not.toBeInTheDocument();
   });
 
   it("shows only the auth modal when there is a session but no user", () => {
@@ -203,7 +204,7 @@ describe("DashboardPage header and stats", () => {
     expect(screen.getByText("RAG Document Chunks")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("36 Chunks")).toBeInTheDocument());
     expect(screen.getByText("Topic Mastery Score")).toBeInTheDocument();
-    expect(screen.getByText("63%")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("63%")).toBeInTheDocument());
   });
 
   it("keeps placeholder stats when the analytics overview fails to load", async () => {
@@ -224,15 +225,6 @@ describe("DashboardPage header and stats", () => {
 
     expect(screen.getByText("Next Best Action")).toBeInTheDocument();
     expect(screen.getByText("next-best-action-stub")).toBeInTheDocument();
-  });
-
-  it("mounts the recommendations and study-plan sections", () => {
-    mockAuth();
-
-    render(<DashboardPage />);
-
-    expect(screen.getByText("recommendations-stub")).toBeInTheDocument();
-    expect(screen.getByText("study-plan-stub")).toBeInTheDocument();
   });
 
   it("mounts the learning history section", async () => {

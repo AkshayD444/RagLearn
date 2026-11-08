@@ -1,21 +1,24 @@
-import type { Metadata } from "next";
 import "./globals.css";
+import type { Metadata } from "next";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 export const metadata: Metadata = {
-  title: "AI Learning Assistant",
-  description: "Personalized AI-powered educational platform grounded in student study materials",
+  title: "RagLearn",
+  description: "Retrieval-Augmented Growth & Learning",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="en">
-      <body className="antialiased bg-slate-900 text-slate-100 min-h-screen">
-        {children}
-      </body>
-    </html>
+    <ThemeProvider>
+      <html lang="en">
+        <body className="antialiased min-h-screen">
+          {children}
+        </body>
+      </html>
+    </ThemeProvider>
   );
 }

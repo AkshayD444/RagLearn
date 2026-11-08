@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useAuthStore } from "@/store/useAuthStore";
-import { LogIn, UserPlus, Sparkles, AlertCircle } from "lucide-react";
+import { LogIn, UserPlus, AlertCircle, CheckCircle2 } from "lucide-react";
 
 export function AuthModal({ onSuccess }: { onSuccess?: () => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -28,29 +28,33 @@ export function AuthModal({ onSuccess }: { onSuccess?: () => void }) {
   };
 
   return (
-    <div className="w-full max-w-md p-8 rounded-2xl bg-slate-900/90 border border-slate-800 backdrop-blur-xl shadow-2xl">
-      <div className="text-center mb-8">
-        <div className="inline-flex p-3 rounded-2xl bg-sky-500/10 text-sky-400 mb-3 border border-sky-500/20">
-          <Sparkles className="h-6 w-6" />
+    <div className="max-w-md p-6 rounded-2xl border border-border bg-card">
+      <div className="text-center mb-6">
+        <div className="inline-flex p-2 rounded-lg bg-primary/10 border border-primary/20 mb-3">
+          <svg className="h-5 w-5 text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="3" y1="15" x2="21" y2="15"></line>
+            <line x1="9" y1="9" x2="15" y2="9"></line>
+          </svg>
         </div>
-        <h2 className="text-2xl font-bold tracking-tight text-white">
+        <h2 className="text-2xl font-bold tracking-tight text-foreground">
           {mode === "login" ? "Welcome Back" : "Create Student Account"}
         </h2>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-muted mt-1">
           {mode === "login"
             ? "Sign in to access your personalized RAG tutor"
             : "Get started with AI-driven adaptive learning"}
         </p>
       </div>
 
-      <div className="flex p-1 rounded-xl bg-slate-800/80 mb-6 border border-slate-700/50">
+      <div className="flex p-1 rounded-xl bg-slate-800/80 border border-slate-700/50 mb-6">
         <button
           type="button"
           onClick={() => { setMode("login"); clearError(); }}
           className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-2 ${
             mode === "login"
-              ? "bg-sky-600 text-white shadow-md shadow-sky-600/30"
-              : "text-slate-400 hover:text-slate-200"
+              ? "bg-primary text-white shadow-md shadow-primary/30"
+              : "text-slate-400 hover:text-foreground"
           }`}
         >
           <LogIn className="h-3.5 w-3.5" /> Login
@@ -60,25 +64,18 @@ export function AuthModal({ onSuccess }: { onSuccess?: () => void }) {
           onClick={() => { setMode("register"); clearError(); }}
           className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-2 ${
             mode === "register"
-              ? "bg-sky-600 text-white shadow-md shadow-sky-600/30"
-              : "text-slate-400 hover:text-slate-200"
+              ? "bg-primary text-white shadow-md shadow-primary/30"
+              : "text-slate-400 hover:text-foreground"
           }`}
         >
           <UserPlus className="h-3.5 w-3.5" /> Register
         </button>
       </div>
 
-      {error && (
-        <div className="p-3 mb-6 rounded-lg bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs flex items-center gap-2">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-
       <form onSubmit={handleSubmit} className="space-y-4">
         {mode === "register" && (
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">
+            <label className="block text-xs font-medium text-muted mb-1">
               Full Name
             </label>
             <input
@@ -87,13 +84,13 @@ export function AuthModal({ onSuccess }: { onSuccess?: () => void }) {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               placeholder="e.g. Alex Johnson"
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-800/60 border border-slate-700/60 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all"
+              className="w-full px-4 py-2.5 rounded-xl input bg-transparent border border-border text-foreground placeholder-muted-focus focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
             />
           </div>
         )}
 
         <div>
-          <label className="block text-xs font-medium text-slate-300 mb-1">
+          <label className="block text-xs font-medium text-muted mb-1">
             Email Address
           </label>
           <input
@@ -102,12 +99,12 @@ export function AuthModal({ onSuccess }: { onSuccess?: () => void }) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="student@university.edu"
-            className="w-full px-4 py-2.5 rounded-xl bg-slate-800/60 border border-slate-700/60 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all"
+            className="w-full px-4 py-2.5 rounded-xl input bg-transparent border border-border text-foreground placeholder-muted-focus focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
           />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-slate-300 mb-1">
+          <label className="block text-xs font-medium text-muted mb-1">
             Password
           </label>
           <input
@@ -116,14 +113,14 @@ export function AuthModal({ onSuccess }: { onSuccess?: () => void }) {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
-            className="w-full px-4 py-2.5 rounded-xl bg-slate-800/60 border border-slate-700/60 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition-all"
+            className="w-full px-4 py-2.5 rounded-xl input bg-transparent border border-border text-foreground placeholder-muted-focus focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
           />
         </div>
 
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full mt-2 py-3 px-4 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white font-semibold text-sm shadow-lg shadow-sky-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+          className="w-full mt-3 px-4 py-2.5 rounded-xl btn-primary transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isLoading ? (
             <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
@@ -134,6 +131,13 @@ export function AuthModal({ onSuccess }: { onSuccess?: () => void }) {
           )}
         </button>
       </form>
+
+      {error && (
+        <div className="mt-3 p-3 rounded-xl border border-accent/30 bg-accent/5 text-accent-text text-xs flex items-center gap-2">
+          <AlertCircle className="h-3.5 w-3.5" />
+          <span>{error}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -100,6 +100,7 @@ async function renderReady() {
   mockAuth();
   render(<SubjectDetailPage />);
   await waitFor(() => expect(getSubject).toHaveBeenCalledWith(SUBJECT_ID));
+  await waitFor(() => expect(getSubjectDocuments).toHaveBeenCalledWith(SUBJECT_ID));
   // The title also appears in the breadcrumb, so anchor on the uploader.
   await screen.findByText("uploader-stub");
 }

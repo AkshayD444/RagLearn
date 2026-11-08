@@ -11,35 +11,9 @@ import { QuizSection } from "@/components/quiz/QuizSection";
 import { FlashcardSection } from "@/components/flashcards/FlashcardSection";
 import { StudentIntelligence } from "@/components/analytics/StudentIntelligence";
 import { ErrorBanner } from "@/components/shared/ErrorBanner";
-import { 
-  ArrowLeft, 
-  BookOpen, 
-  Bot, 
-  BrainCircuit, 
-  Sparkles, 
-  FileText,
-  Layers,
-  FolderOpen,
-  Activity
-} from "lucide-react";
+import { BookOpen, BrainCircuit, ArrowLeft, Bot, Sparkles, FileText, Layers, FolderOpen, Activity } from "lucide-react";
 
-/**
- * How often a document still being processed is checked.
- *
- * Processing is server-side background work with no push channel, so polling is
- * the honest option. The delay is a guess: a document that finishes in 200ms
- * would sit on a fixed 2s wait, and a slow one would still read as stuck.
- */
 const PROCESS_POLL_INTERVAL_MS = 2000;
-
-/**
- * The hard stop on that poll.
- *
- * Without a ceiling a document stuck in PROCESSING would keep the timer alive
- * for the life of the page. After roughly half a minute the loop gives up and
- * the row keeps its last known state; the Retry and manual refresh paths stay
- * available, and any run still in flight will show up on the next load.
- */
 const PROCESS_POLL_MAX_TICKS = 15;
 
 export default function SubjectDetailPage() {
@@ -64,9 +38,6 @@ export default function SubjectDetailPage() {
     initialize();
   }, [initialize]);
 
-  // Auth has to settle before it is meaningful to fetch: `isLoading` starts
-  // true, and without a session there is nothing to load, so the spinner would
-  // otherwise never stop.
   useEffect(() => {
     if (isAuthenticated && subjectId) {
       fetchSubjectData();
@@ -76,8 +47,6 @@ export default function SubjectDetailPage() {
     }
   }, [isAuthenticated, subjectId]);
 
-  // Clear any in-flight poll timers on unmount so a status loop cannot outlive
-  // the page that started it.
   useEffect(() => {
     const timers = pollTimers.current;
     return () => {
@@ -96,8 +65,6 @@ export default function SubjectDetailPage() {
       setSubject(subjData);
       setDocuments(docsData);
       setLoadError(null);
-      // Documents that were already mid-ingest when the page loaded still need
-      // watching, otherwise a refresh would freeze them on "Chunking...".
       docsData
         .filter((doc) => doc.status === "PROCESSING")
         .forEach((doc) => watchDocument(doc.id));
@@ -109,12 +76,6 @@ export default function SubjectDetailPage() {
     }
   };
 
-  /**
-   * Applies the result of one status read to the matching row in local state.
-   *
-   * Only the status fields are copied, so a poll never has to refetch the whole
-   * document list or clobber unrelated rows.
-   */
   const applyStatus = useCallback((docId: string, status: DocumentStatus) => {
     setDocuments((prev) =>
       prev.map((doc) =>
@@ -130,14 +91,6 @@ export default function SubjectDetailPage() {
     );
   }, []);
 
-  /**
-   * Polls one document until it leaves PROCESSING, or the tick ceiling is hit.
-   *
- * Each step asks only the status endpoint, so the loop is cheap and bounded on
- * both axes: one document at a time, and a fixed number of attempts. A
- * transient failure ends the loop rather than retrying forever; the row keeps
- * its last known state, and the Retry button or a reload restarts tracking.
-   */
   const watchDocument = useCallback(
     (docId: string, tick = 0) => {
       if (tick >= PROCESS_POLL_MAX_TICKS) return;
@@ -191,7 +144,10 @@ export default function SubjectDetailPage() {
   };
 
   const scrollToSection = (sectionId: string) => {
-    document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const element = document.getElementById(sectionId);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   };
 
   useEffect(() => {
@@ -202,24 +158,24 @@ export default function SubjectDetailPage() {
           : focusSection === "flashcards"
             ? "flashcards"
             : "quiz-engine";
-      document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const element = document.getElementById(sectionId);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     }
   }, [focusSection, recommendedTopic, isLoading]);
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="h-8 w-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin"></div>
+        <div className="h-8 w-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
       </div>
     );
   }
 
   if (!subject) {
     return (
-      <div className="min-h-screen bg-slate-950 p-8 text-center text-slate-300 space-y-4">
-        {/* A failed fetch and a genuinely missing subject look identical if only
-            `subject` is checked, so the captured error decides which one this is
-            and only the recoverable case offers a retry. */}
+      <div className="min-h-screen bg-slate-950 p-8 text-slate-300 space-y-4">
         {loadError ? (
           <>
             <ErrorBanner message={loadError} />
@@ -247,9 +203,9 @@ export default function SubjectDetailPage() {
   const readyDocs = documents.filter((d) => d.status === "READY").length;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-16">
+    <div className="min-h-screen bg-slate-950 text-slate-100 pb-12">
       {/* Header Bar */}
-      <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-900/80 backdrop-blur-xl">
+      <header className="sticky top-0 z-40 border-b border-border bg-slate-900/80 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <button
             onClick={() => router.push("/dashboard")}
@@ -259,9 +215,9 @@ export default function SubjectDetailPage() {
           </button>
 
           <div className="flex items-center gap-2">
-            <span 
-              className="h-3 w-3 rounded-full" 
-              style={{ backgroundColor: subject.color }} 
+            <span
+              className="h-3 w-3 rounded-full"
+              style={{ backgroundColor: subject.color }}
             />
             <span className="font-bold text-sm text-white">{subject.title}</span>
           </div>
@@ -271,17 +227,12 @@ export default function SubjectDetailPage() {
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* Subject Hero Header */}
-        <div 
-          className="relative overflow-hidden rounded-3xl border border-slate-800 p-6 sm:p-8 bg-slate-900/60"
-        >
-          <div 
-            className="absolute top-0 left-0 right-0 h-2" 
-            style={{ backgroundColor: subject.color }} 
-          />
+        <div className="relative overflow-hidden rounded-3xl border border-border bg-slate-900/60 p-6 sm:p-8">
+          <div className="absolute top-0 left-0 right-0 h-2" style={{ backgroundColor: subject.color }} />
 
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="space-y-2 max-w-2xl">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800 text-slate-300 text-xs font-semibold">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-slate-800 text-slate-300 text-xs font-semibold">
                 <BookOpen className="h-3.5 w-3.5" style={{ color: subject.color }} /> Subject Module
               </div>
               <h1 className="text-3xl font-extrabold text-white tracking-tight">{subject.title}</h1>
@@ -295,21 +246,21 @@ export default function SubjectDetailPage() {
               <button
                 disabled={readyDocs === 0}
                 onClick={() => scrollToSection("rag-tutor")}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 text-white text-xs font-semibold shadow-lg shadow-sky-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-primary text-primary text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 <Bot className="h-4 w-4" /> Ask RAG Tutor
               </button>
               <button
                 disabled={readyDocs === 0}
                 onClick={() => scrollToSection("quiz-engine")}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600/30 text-purple-300 border border-purple-500/40 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-300 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 <Sparkles className="h-4 w-4" /> Generate Quiz
               </button>
               <button
                 disabled={readyDocs === 0}
                 onClick={() => scrollToSection("flashcards")}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800/60 text-slate-300 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               >
                 <Layers className="h-4 w-4" /> Build Flashcards
               </button>
@@ -319,8 +270,8 @@ export default function SubjectDetailPage() {
 
         {/* Stats Row */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/40 flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20">
+          <div className="p-4 rounded-2xl border border-border bg-slate-900/40 flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
               <FileText className="h-5 w-5" />
             </div>
             <div>
@@ -329,8 +280,8 @@ export default function SubjectDetailPage() {
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/40 flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+          <div className="p-4 rounded-2xl border border-border bg-slate-900/40 flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
               <Layers className="h-5 w-5" />
             </div>
             <div>
@@ -339,8 +290,8 @@ export default function SubjectDetailPage() {
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/40 flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <div className="p-4 rounded-2xl border border-border bg-slate-900/40 flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
               <BrainCircuit className="h-5 w-5" />
             </div>
             <div>
@@ -351,7 +302,7 @@ export default function SubjectDetailPage() {
         </div>
 
         {/* Upload & Documents Section */}
-        <div id="study-materials" className="space-y-6 scroll-mt-20">
+        <section id="study-materials" className="space-y-6 scroll-mt-20">
           <div className="space-y-1">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
               <FolderOpen className="h-5 w-5 text-sky-400" /> Study Materials & PDFs
@@ -366,7 +317,7 @@ export default function SubjectDetailPage() {
             onUploadSuccess={handleDocumentUploaded}
           />
 
-          <div className="pt-4 space-y-3">
+          <section className="pt-4 space-y-3">
             {loadError && <ErrorBanner message={loadError} />}
             <DocumentList
               documents={documents}
@@ -374,8 +325,8 @@ export default function SubjectDetailPage() {
               onReprocess={handleReprocessDocument}
               reprocessingId={reprocessingId}
             />
-          </div>
-        </div>
+          </section>
+        </section>
 
         {/* RAG Tutor Section */}
         <section id="rag-tutor" className="space-y-6 scroll-mt-20">
@@ -395,10 +346,10 @@ export default function SubjectDetailPage() {
         <section id="quiz-engine" className="space-y-6 scroll-mt-20">
           <div>
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-purple-400" /> Quiz Engine
+              <Sparkles className="h-5 w-5 text-sky-400" /> Quiz Engine
             </h2>
             <p className="text-xs text-slate-400">
-              Configure a multiple-choice quiz generated from this subject&apos;s study materials, complete and submit
+              Configure a multiple-choice quiz generated from this subject's study materials, complete and submit
               it, then review explanations and sources.
             </p>
           </div>
@@ -417,7 +368,7 @@ export default function SubjectDetailPage() {
               <Layers className="h-5 w-5 text-cyan-400" /> Flashcards
             </h2>
             <p className="text-xs text-slate-400">
-              Generate a deck of question-and-answer cards from this subject&apos;s materials, then self-grade each card
+              Generate a deck of question-and-answer cards from this subject's materials, then self-grade each card
               to track your progress. Every card keeps a citation back to the source it came from.
             </p>
           </div>
