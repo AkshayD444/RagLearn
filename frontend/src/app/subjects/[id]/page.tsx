@@ -349,7 +349,7 @@ export default function SubjectDetailPage() {
               <Sparkles className="h-5 w-5 text-sky-400" /> Quiz Engine
             </h2>
             <p className="text-xs text-slate-400">
-              Configure a multiple-choice quiz generated from this subject's study materials, complete and submit
+              Configure a multiple-choice quiz generated from this subject&apos;s study materials, complete and submit
               it, then review explanations and sources.
             </p>
           </div>
@@ -368,7 +368,7 @@ export default function SubjectDetailPage() {
               <Layers className="h-5 w-5 text-cyan-400" /> Flashcards
             </h2>
             <p className="text-xs text-slate-400">
-              Generate a deck of question-and-answer cards from this subject's materials, then self-grade each card
+              Generate a deck of question-and-answer cards from this subject&apos;s materials, then self-grade each card
               to track your progress. Every card keeps a citation back to the source it came from.
             </p>
           </div>
