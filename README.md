@@ -1,204 +1,556 @@
-RagLearn
-Learn smarter with AI.
-RagLearn is an AI-powered learning platform designed to make studying more interactive, personalized, and effective.
-It combines intelligent AI tutoring, document-based question answering, flashcards, quizzes, adaptive study planning, and learning analytics in one platform.
-Built using Next.js, FastAPI, PostgreSQL, pgvector, and Google Gemini AI.
 
-Features
+# ✦ RagLearn
 
-AI Tutor: Ask questions and get AI-powered explanations.
-Document-Based Learning: Upload learning materials and interact with their content through retrieval-augmented generation (RAG).
-Flashcards: Generate and review flashcards to reinforce learning.
-Quizzes: Test your understanding with interactive quizzes.
-Study Planning: Organize learning activities through personalized study plans.
-Learning Analytics: Track learning progress and identify areas that need improvement.
-Subject Management: Organize learning materials and activities by subject.
+### Learn smarter. Learn with AI.
 
+<p align="center">
+  An AI-powered learning platform designed to make studying more interactive, personalized, and effective.
+</p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js" />
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/Google_Gemini-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Gemini" />
+</p>
 
-Technology Stack
+---
 
+## 📑 Table of Contents
 
+- [Overview](#-overview)
+- [Features](#-features)
+- [Technology Stack](#-technology-stack)
+- [System Architecture](#-system-architecture)
+- [Project Structure](#-project-structure)
+- [Getting Started](#-getting-started)
+- [Environment Configuration](#-environment-configuration)
+- [API Documentation](#-api-documentation)
+- [Testing](#-testing)
+- [Continuous Integration](#-continuous-integration)
+- [Future Improvements](#-future-improvements)
+- [Contributing](#-contributing)
+- [License](#-license)
 
-Layer
-Technologies
+---
 
+## 🎯 Overview
 
+**RagLearn** is an AI-powered learning assistant that helps learners organize their study materials and interact with educational content through AI.
 
+The platform combines document-based learning with AI-powered assistance to provide a more interactive learning experience.
 
-Frontend
-Next.js, TypeScript, Tailwind CSS
+Instead of simply reading through study materials, users can use RagLearn to interact with their learning resources, ask questions, and work with AI-assisted study tools.
 
+### 💡 Core Idea
 
-State Management
-Zustand, TanStack Query
+Transform traditional study materials into an interactive learning environment using **Retrieval-Augmented Generation (RAG)** and generative AI.
 
+---
 
-Backend
-Python, FastAPI, SQLAlchemy 2.0
+## ✨ Features
 
+### 🤖 AI Learning Assistant
 
-Database
-PostgreSQL 16, pgvector
+- Interact with an AI-powered learning assistant.
+- Ask questions and receive contextual explanations.
+- Use AI to understand learning materials.
 
+### 📚 Document-Based Learning
 
-AI Integration
-Google Gemini AI
+- Upload and manage study documents.
+- Organize documents under subjects.
+- Retrieve relevant information from learning materials.
+- Use document context to support AI-generated answers.
 
+### 🧠 Flashcards
 
-Infrastructure
-Docker Compose
+- Create and manage flashcards.
+- Use flashcards for active recall.
+- Review learning materials in smaller, manageable sections.
 
+### 📝 Quizzes
 
-Testing
-Pytest, Vitest
+- Generate and attempt quizzes.
+- Test understanding of learning materials.
+- Use quiz-based practice to reinforce concepts.
 
+### 📅 Study Planning
 
+- Organize learning activities.
+- Manage study plans.
+- Keep track of learning goals.
 
+### 📊 Learning Analytics
 
-Project Architecture
-RagLearn follows a frontend-backend architecture:
+- View learning-related statistics.
+- Monitor study activity and progress.
+- Get an overview of learning performance.
 
-Frontend: Next.js application responsible for the user interface and client-side interactions.
-Backend: FastAPI application providing REST APIs, authentication, learning services, and AI-powered functionality.
-Database: PostgreSQL with pgvector for persistent data and vector-based retrieval.
+### 📂 Subject Management
 
+- Organize learning materials by subject.
+- Keep related documents and study resources together.
+- Manage different areas of learning from one platform.
 
-Local Development Setup
-Prerequisites
+---
 
-Python 3.11+
-Node.js and npm
-Docker and Docker Compose
-Google Gemini API key
+## 🛠️ Technology Stack
 
-1. Start the Database
-From the repository root:
-docker-compose up -d
+RagLearn uses a modern full-stack architecture.
 
-The PostgreSQL database will run on localhost:5432 with database name ai_learning_assistant.
-2. Backend Setup
-Navigate to the backend directory:
-cd backend
+| Layer | Technologies |
+|---|---|
+| Frontend | Next.js, React, TypeScript |
+| Styling | Tailwind CSS |
+| Data Fetching | TanStack Query |
+| State Management | Zustand |
+| Backend | Python, FastAPI |
+| ORM | SQLAlchemy 2.0 Async |
+| Database Driver | AsyncPG |
+| Validation | Pydantic v2 |
+| Database | PostgreSQL 16 |
+| Vector Database | pgvector |
+| AI Integration | Google Gemini API |
+| Containerization | Docker, Docker Compose |
+| Testing | Pytest, frontend testing tools |
 
-Create a virtual environment:
-python -m venv venv
+---
 
-Activate it:
-Windows PowerShell
-.\venv\Scripts\Activate.ps1
+## 🏗️ System Architecture
 
-Linux / macOS
-source venv/bin/activate
+RagLearn follows a frontend-backend architecture.
 
-Install dependencies:
-pip install -c constraints.txt -r requirements.txt
+```text
+                    ┌──────────────────────┐
+                    │       USER           │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │    NEXT.JS FRONTEND  │
+                    │                      │
+                    │  React + TypeScript  │
+                    │  Tailwind CSS        │
+                    │  TanStack Query      │
+                    │  Zustand             │
+                    └──────────┬───────────┘
+                               │
+                          HTTP / REST
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │    FASTAPI BACKEND   │
+                    │                      │
+                    │  Authentication      │
+                    │  API Endpoints       │
+                    │  Business Logic      │
+                    │  AI Integration      │
+                    └──────────┬───────────┘
+                               │
+                  ┌────────────┴────────────┐
+                  │                         │
+                  ▼                         ▼
+       ┌────────────────────┐   ┌────────────────────┐
+       │    POSTGRESQL      │   │    GOOGLE GEMINI   │
+       │                    │   │                    │
+       │  Application Data  │   │  Generative AI     │
+       │  User Data         │   │  Embeddings        │
+       │  Document Data     │   │                    │
+       │  pgvector          │   │                    │
+       └────────────────────┘   └────────────────────┘
+```
 
-Configure environment variables:
-cp .env.example .env
+### Retrieval-Augmented Generation (RAG)
 
-Configure the required environment values in .env. Keep your actual secrets private.
-Start the backend:
-uvicorn app.main:app --reload --port 8000
+The document-based AI workflow is designed around Retrieval-Augmented Generation.
 
-Backend endpoints:
+```text
+      Study Documents
+             │
+             ▼
+      Document Processing
+             │
+             ▼
+        Text Extraction
+             │
+             ▼
+       Text Chunking
+             │
+             ▼
+        Embeddings
+             │
+             ▼
+      Vector Storage
+             │
+             ▼
+       User Question
+             │
+             ▼
+      Relevant Retrieval
+             │
+             ▼
+       Gemini API
+             │
+             ▼
+      Contextual Answer
+```
 
-API Documentation: http://localhost:8000/api/v1/docs
-Health Check: http://localhost:8000/api/v1/health
-Database Health: http://localhost:8000/api/v1/health/db
+---
 
-3. Frontend Setup
-Open another terminal and navigate to the frontend directory:
-cd frontend
+## 📁 Project Structure
 
-Install dependencies:
-npm ci
-
-Configure environment variables:
-cp .env.example .env.local
-
-Start the development server:
-npm run dev
-
-Open:
-http://localhost:3000
-
-Project Structure
+```text
 RagLearn/
-├── .github/
-│   └── workflows/
-│       └── ci.yml
+│
 ├── backend/
 │   ├── app/
-│   │   ├── api/v1/
+│   │   ├── api/
 │   │   ├── core/
 │   │   ├── models/
 │   │   ├── schemas/
-│   │   ├── rag/
-│   │   └── services/
+│   │   ├── services/
+│   │   └── main.py
+│   │
 │   ├── tests/
-│   ├── .env.example
-│   ├── app/main.py
-│   ├── pytest.ini
 │   ├── requirements.txt
-│   └── constraints.txt
+│   ├── constraints.txt
+│   └── alembic.ini
+│
 ├── frontend/
+│   ├── public/
 │   ├── src/
 │   │   ├── app/
 │   │   ├── components/
+│   │   ├── hooks/
 │   │   ├── lib/
-│   │   ├── store/
-│   │   └── test/
+│   │   ├── services/
+│   │   └── stores/
+│   │
 │   ├── package.json
-│   ├── package-lock.json
-│   ├── vitest.config.ts
-│   └── tsconfig.json
+│   └── package-lock.json
+│
+├── .github/
+│   └── workflows/
+│
 ├── docker-compose.yml
-├── .gitignore
-└── README.md
+├── README.md
+└── .gitignore
+```
 
+---
 
-Verification and Testing
-Run these commands to verify the application.
-Backend
+## 🚀 Getting Started
+
+Follow these instructions to set up RagLearn locally.
+
+### 📌 Prerequisites
+
+Make sure you have the following installed:
+
+- **Python 3.11+**
+- **Node.js and npm**
+- **Docker Desktop** or Docker Engine
+- **Git**
+- **Google Gemini API key**
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/AkshayD444/RagLearn.git
+
+cd RagLearn
+```
+
+### 2. Start the Database
+
+Start the PostgreSQL database using Docker Compose.
+
+```bash
+docker-compose up -d
+```
+
+Check whether the containers are running:
+
+```bash
+docker-compose ps
+```
+
+The database is configured to use:
+
+| Configuration | Value |
+|---|---|
+| Host | localhost |
+| Port | 5432 |
+| Database | ai_learning_assistant |
+
+### 3. Set Up the Backend
+
+Navigate to the backend directory:
+
+```bash
 cd backend
+```
 
-python -m pytest -q
-python -m compileall -q app
+Create a Python virtual environment:
 
-PostgreSQL integration tests require a running pgvector database:
-docker-compose up -d postgres
+```bash
+python -m venv .venv
+```
 
-Then:
-TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ai_learning_assistant \
-    python -m pytest -q -m postgres
+Activate the virtual environment.
 
-Frontend
+**Linux / macOS / WSL:**
+
+```bash
+source .venv/bin/activate
+```
+
+**Windows PowerShell:**
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Install the dependencies:
+
+```bash
+pip install -c constraints.txt -r requirements.txt
+```
+
+### 4. Configure Backend Environment Variables
+
+Create your environment file:
+
+```bash
+cp .env.example .env
+```
+
+Configure the required environment variables in `.env`.
+
+**Important:** Never commit your `.env` file or expose API keys and secret credentials.
+
+### 5. Run Database Migrations
+
+Apply the database migrations:
+
+```bash
+alembic upgrade head
+```
+
+### 6. Start the Backend Server
+
+```bash
+uvicorn app.main:app --reload --port 8000
+```
+
+The backend will be available at:
+
+```text
+http://localhost:8000
+```
+
+### 7. Set Up the Frontend
+
+Open another terminal and navigate to the frontend directory:
+
+```bash
 cd frontend
+```
 
+Install dependencies:
+
+```bash
 npm ci
+```
+
+Create the frontend environment file:
+
+```bash
+cp .env.example .env.local
+```
+
+Configure the required frontend environment variables.
+
+### 8. Start the Frontend Server
+
+```bash
+npm run dev
+```
+
+The frontend will be available at:
+
+```text
+http://localhost:3000
+```
+
+---
+
+## ⚙️ Environment Configuration
+
+RagLearn requires environment variables for backend and frontend configuration.
+
+### Backend
+
+Configure the following in `backend/.env`, using the names and values required by `backend/.env.example`.
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection URL |
+| `SECRET_KEY` | Application authentication secret |
+| `GEMINI_API_KEY` | Google Gemini API key |
+
+### Frontend
+
+Configure the frontend environment variables in `frontend/.env.local` according to `frontend/.env.example`.
+
+**Note:** Do not share or commit environment files containing credentials.
+
+---
+
+## 🔌 API Documentation
+
+RagLearn provides a REST API powered by FastAPI.
+
+Once the backend server is running, access the interactive API documentation.
+
+| Resource | URL |
+|---|---|
+| API Documentation | http://localhost:8000/api/v1/docs |
+| Health Check | http://localhost:8000/api/v1/health |
+| Database Health | http://localhost:8000/api/v1/health/db |
+
+The Swagger UI allows you to explore available endpoints and test API requests.
+
+---
+
+## 🧪 Testing
+
+RagLearn includes backend and frontend testing workflows.
+
+### Backend Tests
+
+Navigate to the backend directory:
+
+```bash
+cd backend
+```
+
+Run the test suite:
+
+```bash
+pytest
+```
+
+Run Python compilation checks:
+
+```bash
+python -m compileall app
+```
+
+### Frontend Tests
+
+Navigate to the frontend directory:
+
+```bash
+cd frontend
+```
+
+Run TypeScript type checking:
+
+```bash
 npm run typecheck
-npm test
+```
+
+Run frontend tests:
+
+```bash
+npm run test
+```
+
+Run linting:
+
+```bash
 npm run lint
+```
+
+Build the production application:
+
+```bash
 npm run build
+```
 
+---
 
-Continuous Integration
-The GitHub Actions workflow at .github/workflows/ci.yml runs three jobs:
+## 🔄 Continuous Integration
 
-Backend SQLite tests.
-Backend PostgreSQL/pgvector integration tests.
-Frontend typechecking, linting, tests, and production build.
+RagLearn uses GitHub Actions for automated checks.
 
-Dependency versions are pinned to improve reproducibility. The backend uses requirements.txt and constraints.txt, while the frontend uses package-lock.json with npm ci.
+The CI workflow includes:
 
-Future Improvements
+- **Backend testing:** Runs backend tests using SQLite.
+- **PostgreSQL testing:** Runs tests requiring PostgreSQL and pgvector.
+- **Frontend validation:** Runs type checking, linting, tests, and production builds.
 
-Further improvements to adaptive learning and recommendations.
-Expanded AI tutoring capabilities.
-Additional learning analytics and progress insights.
-Improvements to the overall learning experience.
+These checks help identify issues before changes are merged into the project.
 
+---
 
-License
-License information will be added when the project license is selected.
+## 🔮 Future Improvements
+
+Potential areas for further development include:
+
+- Enhanced AI-generated learning recommendations.
+- More advanced learning analytics.
+- Improved flashcard and quiz generation.
+- Personalized study schedules.
+- Better document processing capabilities.
+- Expanded support for different learning resources.
+- Improved user experience and accessibility.
+
+---
+
+## 🤝 Contributing
+
+Contributions, suggestions, and feedback are welcome.
+
+If you would like to contribute:
+
+1. Fork the repository.
+2. Create a new branch.
+
+```bash
+git checkout -b feature/your-feature-name
+```
+
+3. Make your changes.
+4. Commit your changes.
+
+```bash
+git commit -m "Add: your feature description"
+```
+
+5. Push your branch.
+
+```bash
+git push origin feature/your-feature-name
+```
+
+6. Open a Pull Request.
+
+---
+
+## 📄 License
+
+This project is currently maintained as a personal project.
+
+A formal license can be added when the project is ready for distribution.
+
+---
+
+<p align="center">
+  <b>✦ RagLearn</b>
+  <br />
+  Learn smarter. Learn with AI.
+</p>
