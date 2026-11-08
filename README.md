@@ -1,174 +1,204 @@
-# AI Learning Assistant
+RagLearn
+Learn smarter with AI.
+RagLearn is an AI-powered learning platform designed to make studying more interactive, personalized, and effective.
+It combines intelligent AI tutoring, document-based question answering, flashcards, quizzes, adaptive study planning, and learning analytics in one platform.
+Built using Next.js, FastAPI, PostgreSQL, pgvector, and Google Gemini AI.
 
-A personalized, AI-powered learning platform built with **Next.js**, **FastAPI**, **PostgreSQL + pgvector**, and **Google Gemini AI**.
+Features
 
----
+AI Tutor: Ask questions and get AI-powered explanations.
+Document-Based Learning: Upload learning materials and interact with their content through retrieval-augmented generation (RAG).
+Flashcards: Generate and review flashcards to reinforce learning.
+Quizzes: Test your understanding with interactive quizzes.
+Study Planning: Organize learning activities through personalized study plans.
+Learning Analytics: Track learning progress and identify areas that need improvement.
+Subject Management: Organize learning materials and activities by subject.
 
-## Technical Stack Overview
 
-- **Frontend:** Next.js (App Router), TypeScript, Tailwind CSS, TanStack Query, Zustand
-- **Backend:** Python 3.11+, FastAPI, SQLAlchemy 2.0 (Async), AsyncPG, Pydantic v2, Google GenAI SDK
-- **Database:** PostgreSQL 16 + `pgvector` extension
-- **Infrastructure:** Docker Compose
 
----
+Technology Stack
 
-## Local Development Setup
 
-### 1. Database (PostgreSQL + pgvector via Docker Compose)
 
-Start the database container:
-```bash
+Layer
+Technologies
+
+
+
+
+Frontend
+Next.js, TypeScript, Tailwind CSS
+
+
+State Management
+Zustand, TanStack Query
+
+
+Backend
+Python, FastAPI, SQLAlchemy 2.0
+
+
+Database
+PostgreSQL 16, pgvector
+
+
+AI Integration
+Google Gemini AI
+
+
+Infrastructure
+Docker Compose
+
+
+Testing
+Pytest, Vitest
+
+
+
+
+Project Architecture
+RagLearn follows a frontend-backend architecture:
+
+Frontend: Next.js application responsible for the user interface and client-side interactions.
+Backend: FastAPI application providing REST APIs, authentication, learning services, and AI-powered functionality.
+Database: PostgreSQL with pgvector for persistent data and vector-based retrieval.
+
+
+Local Development Setup
+Prerequisites
+
+Python 3.11+
+Node.js and npm
+Docker and Docker Compose
+Google Gemini API key
+
+1. Start the Database
+From the repository root:
 docker-compose up -d
-```
-The database will run on `localhost:5432` with database `ai_learning_assistant`.
 
----
+The PostgreSQL database will run on localhost:5432 with database name ai_learning_assistant.
+2. Backend Setup
+Navigate to the backend directory:
+cd backend
 
-### 2. Backend Setup (FastAPI)
+Create a virtual environment:
+python -m venv venv
 
-1. Navigate to the `backend` directory:
-   ```bash
-   cd backend
-   ```
-2. Create and activate a Python virtual environment:
-   ```bash
-   python -m venv venv
-   # On Windows PowerShell:
-   .\venv\Scripts\Activate.ps1
-   # On macOS/Linux:
-   source venv/bin/activate
-   ```
-3. Install dependencies:
-   ```bash
-   # -c applies constraints.txt, which pins the full transitive dependency
-   # graph. Drop the -c and you still get pinned direct dependencies, but
-   # transitive versions float.
-   pip install -c constraints.txt -r requirements.txt
-   ```
+Activate it:
+Windows PowerShell
+.\venv\Scripts\Activate.ps1
 
-4. Configure environment variables:
-   ```bash
-   cp .env.example .env
-   ```
-5. Start the FastAPI development server:
-   ```bash
-   uvicorn app.main:app --reload --port 8000
-   ```
-6. Access API Documentation & Health Endpoints:
-   - **Interactive API Docs (Swagger):** `http://localhost:8000/api/v1/docs`
-   - **API Health Check:** `http://localhost:8000/api/v1/health`
-   - **Database Connection Check:** `http://localhost:8000/api/v1/health/db`
+Linux / macOS
+source venv/bin/activate
 
----
+Install dependencies:
+pip install -c constraints.txt -r requirements.txt
 
-### 3. Frontend Setup (Next.js)
+Configure environment variables:
+cp .env.example .env
 
-1. Navigate to the `frontend` directory:
-   ```bash
-   cd frontend
-   ```
-2. Install dependencies:
-   ```bash
-   # npm ci installs exactly what package-lock.json pins, and fails if the
-   # lock and package.json disagree. Use `npm install` only when you mean to
-   # update the lock.
-   npm ci
-   ```
-3. Configure environment variables:
-   ```bash
-   cp .env.example .env.local
-   ```
-4. Start the Next.js development server:
-   ```bash
-   npm run dev
-   ```
-5. Open `http://localhost:3000` in your browser.
+Configure the required environment values in .env. Keep your actual secrets private.
+Start the backend:
+uvicorn app.main:app --reload --port 8000
 
----
+Backend endpoints:
 
-## Project Structure
+API Documentation: http://localhost:8000/api/v1/docs
+Health Check: http://localhost:8000/api/v1/health
+Database Health: http://localhost:8000/api/v1/health/db
 
-```
-AI-Learning-Assistant/
-├── docker-compose.yml       # Docker Compose for PostgreSQL + pgvector
-├── README.md                # Local setup instructions
-├── .github/workflows/ci.yml # CI: backend tests, pgvector tests, frontend checks
+3. Frontend Setup
+Open another terminal and navigate to the frontend directory:
+cd frontend
+
+Install dependencies:
+npm ci
+
+Configure environment variables:
+cp .env.example .env.local
+
+Start the development server:
+npm run dev
+
+Open:
+http://localhost:3000
+
+Project Structure
+RagLearn/
+├── .github/
+│   └── workflows/
+│       └── ci.yml
 ├── backend/
 │   ├── app/
-│   │   ├── api/v1/          # REST API routers (auth, subjects, documents, rag,
-│   │   │                    #   quizzes, flashcards, analytics, recommendations,
-│   │   │                    #   study-plans, health)
-│   │   ├── core/            # Configuration & async SQLAlchemy database setup
-│   │   ├── models/          # ORM models (Users, Subjects, Documents, Chunks, Quizzes,
-│   │   │                    #   Flashcards, Topic Mastery, etc.)
-│   │   ├── schemas/         # Pydantic request/response schemas
-│   │   ├── rag/             # Grounded RAG retrieval & Gemini SDK wrappers
-│   │   └── services/        # Business logic (Quiz Engine, Flashcard Engine,
-│   │                        #   Student Intelligence, Weak Topic Detection,
-│   │                        #   Adaptive Learning, Adaptive Mastery,
-│   │                        #   Next-Learning Intelligence, Study Planner)
-│   ├── tests/               # Pytest suite (SQLite) + tests/integration (pgvector)
+│   │   ├── api/v1/
+│   │   ├── core/
+│   │   ├── models/
+│   │   ├── schemas/
+│   │   ├── rag/
+│   │   └── services/
+│   ├── tests/
 │   ├── .env.example
-│   ├── app/main.py          # FastAPI entry point
+│   ├── app/main.py
 │   ├── pytest.ini
-│   └── requirements.txt
-└── frontend/
-    ├── src/
-    │   ├── app/             # Next.js App Router (Layouts & Pages)
-    │   ├── components/      # Feature components (auth, documents, rag, quiz,
-    │   │                    #   flashcards, analytics, study-plan, ...)
-    │   ├── lib/             # Typed API client and shared domain types
-    │   ├── store/           # Zustand auth store
-    │   └── test/            # Vitest unit tests and payload factories
-    ├── package.json
-    ├── vitest.config.ts
-    ├── tailwind.config.ts
-    └── tsconfig.json
-```
+│   ├── requirements.txt
+│   └── constraints.txt
+├── frontend/
+│   ├── src/
+│   │   ├── app/
+│   │   ├── components/
+│   │   ├── lib/
+│   │   ├── store/
+│   │   └── test/
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── vitest.config.ts
+│   └── tsconfig.json
+├── docker-compose.yml
+├── .gitignore
+└── README.md
 
----
 
-## Verification Commands
-
-Run from the repository root.
-
-### Backend
-
-```bash
+Verification and Testing
+Run these commands to verify the application.
+Backend
 cd backend
-python -m pytest -q            # full SQLite suite
-python -m compileall -q app     # byte-compile check
-```
 
-The `postgres`-marked tests skip automatically unless a live pgvector instance
-is configured:
+python -m pytest -q
+python -m compileall -q app
 
-```bash
+PostgreSQL integration tests require a running pgvector database:
 docker-compose up -d postgres
+
+Then:
 TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ai_learning_assistant \
     python -m pytest -q -m postgres
-```
 
-### Frontend
-
-```bash
+Frontend
 cd frontend
+
 npm ci
-npm run typecheck              # tsc --noEmit
-npm test                       # Vitest
-npm run lint                   # next lint
-npm run build                  # production build (also type-checks and lints)
-```
+npm run typecheck
+npm test
+npm run lint
+npm run build
 
-Dependency versions are pinned rather than ranged, so a build resolves to what
-the suite is known to pass against: `backend/requirements.txt` pins the direct
-dependencies, `backend/constraints.txt` pins the full transitive closure, and
-`frontend/package-lock.json` pins the frontend. CI installs with
-`pip install -c constraints.txt -r requirements.txt` and `npm ci`, so a lock that
-drifts from the manifests fails the build instead of quietly installing
-something new. Bumping a version is a deliberate edit to two files, not a
-side effect of installing.
 
-`.github/workflows/ci.yml` runs these same commands across three jobs: backend
-(SQLite), backend pgvector integration tests, and frontend typecheck/lint/test/build.
+Continuous Integration
+The GitHub Actions workflow at .github/workflows/ci.yml runs three jobs:
+
+Backend SQLite tests.
+Backend PostgreSQL/pgvector integration tests.
+Frontend typechecking, linting, tests, and production build.
+
+Dependency versions are pinned to improve reproducibility. The backend uses requirements.txt and constraints.txt, while the frontend uses package-lock.json with npm ci.
+
+Future Improvements
+
+Further improvements to adaptive learning and recommendations.
+Expanded AI tutoring capabilities.
+Additional learning analytics and progress insights.
+Improvements to the overall learning experience.
+
+
+License
+License information will be added when the project license is selected.
